@@ -11,22 +11,21 @@ import {
   DestinationsGrid,
   TripPlannerForm,
   Footer,
-  auth
 } from "./components/index";
 
 export default function App() {
   
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        console.log("Logged in:", user.displayName);
-      } else {
-        console.log("Logged out");
-      }
-    });
+  // useEffect(() => {
+  //    const unsubscribe = onAuthStateChanged(/*auth*/(user) => {
+  //     if (user) {
+  //       console.log("Logged in:", user.displayName);
+  //     } else {
+  //       console.log("Logged out");
+  //     }
+  //   });
 
-    return unsubscribe;
-  }, []);
+  //   return unsubscribe;
+  // }, []);
 
   return (
     <>

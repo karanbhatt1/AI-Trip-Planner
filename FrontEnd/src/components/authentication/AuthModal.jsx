@@ -1,29 +1,96 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Signin from "./Signin";
 import OtpProcess from "./OtpProcess";
-import { useEffect } from "react";
-import { auth, googleProvider } from "../index";
-import { signInWithPopup } from "firebase/auth";
-
+// Import the initialized auth from your firebase.js
+import { auth, googleProvider } from "../../firebase";
+import {
+  signInWithPopup,
+  RecaptchaVerifier,
+  signInWithPhoneNumber,
+} from "firebase/auth";
 
 export default function AuthModal({ onClose }) {
-  const [step, setStep] = useState("signin"); // signin | otp
+  const [step, setStep] = useState("signin");
   const [phone, setPhone] = useState("");
+  const [confirmationResult, setConfirmationResult] = useState(null);
+  const [loading, setLoading] = useState(false);
 
-  const handleGoogleSignin = async () => {
+  // ✅ Initialize Recaptcha
+  const setupRecaptcha = () => {
+    if (window.recaptchaVerifier) return window.recaptchaVerifier;
+
     try {
-      console.log("Opening Google popup...");
-      const result = await signInWithPopup(auth, googleProvider);
-      const user = result.user;
-
-      console.log("Google User:", user.displayName);
-      console.log("Popup success");
-      onClose(); // close modal on success
+      window.recaptchaVerifier = new RecaptchaVerifier(
+        auth,
+        "recaptcha-container", // Ensure this ID exists in the HTML below
+        {
+          size: "invisible",
+          callback: () => console.log("reCAPTCHA verified"),
+          "expired-callback": () => {
+            window.recaptchaVerifier?.clear();
+            window.recaptchaVerifier = null;
+          },
+        },
+      );
+      return window.recaptchaVerifier;
     } catch (error) {
-      console.error(error);
+      console.error("Recaptcha Setup Error:", error);
+      return null;
     }
   };
 
+  // ✅ Google Sign-in
+  const handleGoogleSignin = async () => {
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      const user = result.user;
+      const token = await user.getIdToken();
+      await fetch("http://localhost:5000/api/auth/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+      });
+      localStorage.setItem("sessionToken", data.sessionToken);
+
+      console.log("Welcome:", result.user.displayName);
+      onClose();
+    } catch (error) {
+      console.error("Google Auth Error:", error);
+    }
+  };
+
+  // ✅ Phone OTP logic
+  const handleSendOtp = async (number) => {
+    if (loading) return;
+    setLoading(true);
+
+    try {
+      const appVerifier = setupRecaptcha();
+      if (!appVerifier) throw new Error("Recaptcha initialization failed");
+
+      const formattedPhone = number.startsWith("+") ? number : `+91${number}`;
+
+      const result = await signInWithPhoneNumber(
+        auth,
+        formattedPhone,
+        appVerifier,
+      );
+
+      setConfirmationResult(result);
+      setPhone(formattedPhone);
+      setStep("otp");
+    } catch (error) {
+      console.error("OTP Error:", error);
+      alert(error.message || "Failed to send OTP. Check console.");
+      // Reset recaptcha on failure so user can try again
+      window.recaptchaVerifier?.clear();
+      window.recaptchaVerifier = null;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Prevent scroll when modal is open
   useEffect(() => {
     document.body.style.overflow = "hidden";
     return () => {
@@ -32,45 +99,42 @@ export default function AuthModal({ onClose }) {
   }, []);
 
   return (
-    <div
-      className="fixed inset-0 z-[9999]
-bg-black/60 backdrop-blur-md
-flex items-center justify-center"
-    >
-      <div
-        className=" relative
-    bg-slate-900/95
-    border border-teal-400
-    rounded-2xl
-    shadow-2xl
-    w-full max-w-md h-max
-    p-6
-    flex flex-col"
-      >
-        <h1 className="text-2xl font-semibold text-white text-center tracking-wide">
-          Plan <span className="text-teal-400 mx-1">•</span>
-          Pack <span className="text-teal-400 mx-1">•</span>
-          Go
-        </h1>
+    <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-md flex items-center justify-center p-4">
+      <div className="relative bg-slate-900/95 border border-teal-400/30 rounded-2xl shadow-2xl w-full max-w-md p-8 flex flex-col">
+        {/* Branding */}
+        <div className="mb-8 text-center">
+          <h1 className="text-2xl font-bold text-white tracking-tight">
+            Plan <span className="text-teal-400">•</span> Pack{" "}
+            <span className="text-teal-400">•</span> Go
+          </h1>
+          <p className="text-slate-400 text-sm mt-2">
+            Your AI Travel Companion
+          </p>
+        </div>
+
         <button
           onClick={onClose}
-          className="absolute top-2 right-2 text-white cursor-pointer"
+          className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors"
         >
           ✕
         </button>
-        {step === "signin" && (
+
+        {step === "signin" ? (
           <Signin
-            onSendOtp={(number) => {
-              setPhone(number);
-              setStep("otp");
-            }}
-            onGoogleSignin={() => {
-              console.log("Google handler reached AuthModal");
-              handleGoogleSignin();
-            }}
+            loading={loading}
+            onGoogleSignin={handleGoogleSignin}
+            onSendOtp={handleSendOtp}
+          />
+        ) : (
+          <OtpProcess
+            phone={phone}
+            confirmationResult={confirmationResult}
+            onSuccess={onClose}
           />
         )}
-        {step === "otp" && <OtpProcess phone={phone} />}
+
+        {/* ✅ Container MUST be outside conditional rendering to stay in DOM */}
+        <div id="recaptcha-container"></div>
       </div>
     </div>
   );
