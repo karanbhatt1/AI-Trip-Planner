@@ -1,12 +1,19 @@
 import { useState } from "react";
-// import { auth } from "../firebase";
+import { auth } from "../../firebase";
 import { signInWithPhoneNumber } from "firebase/auth";
 
-export default function OtpProcess({ phone, confirmationResult }) {
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
+
+export default function OtpProcess({ phone, confirmationResult, onSessionToken }) {
   const [otp, setOtp] = useState("");
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [isResending, setIsResending] = useState(false);
+  const [error, setError] = useState("");
 
   // ✅ Verify OTP
   const handleVerifyOtp = async () => {
+  setIsVerifying(true);
+  setError("");
   try {
     const finalConfirmation =
       confirmationResult || window.confirmationResult;
@@ -18,29 +25,41 @@ export default function OtpProcess({ phone, confirmationResult }) {
 
     const result = await finalConfirmation.confirm(otp);
     const user = result.user;
+    const token = await user.getIdToken();
 
     console.log("User logged in:", user);
-    alert("Login successful ✅");
 
-    await fetch("http://localhost:5000/api/auth/verify", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify({ token }),
-});
+    const response = await fetch(`${BACKEND_URL}/api/auth/verify`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ token }),
+    });
 
-    const token = await user.getIdToken();
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || "Failed to verify OTP");
+    }
+
+    if (data.sessionToken) {
+      await onSessionToken?.(data.sessionToken);
+    }
+
     console.log("Token:", token);
 
   } catch (error) {
     console.error(error);
-    alert("Invalid OTP ❌");
+    setError(error.message || "Invalid OTP");
+  } finally {
+    setIsVerifying(false);
   }
 };
 
   // 🔁 Resend OTP
   const handleResendOtp = async () => {
+  setIsResending(true);
+  setError("");
   try {
     const result = await signInWithPhoneNumber(
       auth,
@@ -48,20 +67,20 @@ export default function OtpProcess({ phone, confirmationResult }) {
       window.recaptchaVerifier
     );
 
-    alert("OTP resent 🔁");
-
     // store globally as fallback
     window.confirmationResult = result;
 
   } catch (error) {
     console.error(error);
-    alert("Error resending OTP");
+    setError("Error resending OTP");
+  } finally {
+    setIsResending(false);
   }
 };
 
   return (
     <div className="w-full h-full flex flex-col justify-center gap-4 text-center">
-      <div className="mx-auto flex flex-col items-center justify-center border-2 border-teal-400 rounded-xl w-[360px] h-[360px] gap-4">
+      <div className="mx-auto flex flex-col items-center justify-center border-2 border-teal-400 rounded-xl w-90 h-90 gap-4">
 
         <p className="text-white">OTP sent to {phone}</p>
 
@@ -77,18 +96,22 @@ export default function OtpProcess({ phone, confirmationResult }) {
         <section className="flex flex-row justify-center gap-4">
           <button
             onClick={handleVerifyOtp}
-            className="bg-green-500 font-bold rounded p-2 cursor-pointer"
+            disabled={isVerifying}
+            className="bg-green-500 font-bold rounded p-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            Verify OTP
+            {isVerifying ? "Verifying..." : "Verify OTP"}
           </button>
 
           <button
             onClick={handleResendOtp}
-            className="bg-blue-300 font-bold rounded p-2 cursor-pointer"
+            disabled={isResending}
+            className="bg-blue-300 font-bold rounded p-2 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            Resend OTP
+            {isResending ? "Sending..." : "Resend OTP"}
           </button>
         </section>
+
+        {error ? <p className="text-sm text-red-400 px-4">{error}</p> : null}
 
       </div>
     </div>

@@ -8,12 +8,25 @@ import {
   RecaptchaVerifier,
   signInWithPhoneNumber,
 } from "firebase/auth";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "../../context/AuthContext";
+
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
 
 export default function AuthModal({ onClose }) {
   const [step, setStep] = useState("signin");
   const [phone, setPhone] = useState("");
   const [confirmationResult, setConfirmationResult] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const { loginWithSessionToken } = useAuth();
+  const navigate = useNavigate();
+
+  const completeLogin = async (sessionToken) => {
+    await loginWithSessionToken(sessionToken);
+    onClose();
+    navigate('/dashboard');
+  };
 
   // ✅ Initialize Recaptcha
   const setupRecaptcha = () => {
@@ -42,20 +55,29 @@ export default function AuthModal({ onClose }) {
   // ✅ Google Sign-in
   const handleGoogleSignin = async () => {
     try {
+      setError("");
       const result = await signInWithPopup(auth, googleProvider);
       const user = result.user;
       const token = await user.getIdToken();
-      await fetch("http://localhost:5000/api/auth/verify", {
+      const response = await fetch(`${BACKEND_URL}/api/auth/verify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token }),
       });
-      localStorage.setItem("sessionToken", data.sessionToken);
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to verify sign-in");
+      }
+
+      if (data.sessionToken) {
+        await completeLogin(data.sessionToken);
+      }
 
       console.log("Welcome:", result.user.displayName);
-      onClose();
     } catch (error) {
       console.error("Google Auth Error:", error);
+      setError(error.message || "Google sign-in failed");
     }
   };
 
@@ -63,6 +85,7 @@ export default function AuthModal({ onClose }) {
   const handleSendOtp = async (number) => {
     if (loading) return;
     setLoading(true);
+    setError("");
 
     try {
       const appVerifier = setupRecaptcha();
@@ -81,7 +104,7 @@ export default function AuthModal({ onClose }) {
       setStep("otp");
     } catch (error) {
       console.error("OTP Error:", error);
-      alert(error.message || "Failed to send OTP. Check console.");
+      setError(error.message || "Failed to send OTP. Check console.");
       // Reset recaptcha on failure so user can try again
       window.recaptchaVerifier?.clear();
       window.recaptchaVerifier = null;
@@ -99,7 +122,7 @@ export default function AuthModal({ onClose }) {
   }, []);
 
   return (
-    <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-md flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-9999 bg-black/60 backdrop-blur-md flex items-center justify-center p-4">
       <div className="relative bg-slate-900/95 border border-teal-400/30 rounded-2xl shadow-2xl w-full max-w-md p-8 flex flex-col">
         {/* Branding */}
         <div className="mb-8 text-center">
@@ -129,9 +152,11 @@ export default function AuthModal({ onClose }) {
           <OtpProcess
             phone={phone}
             confirmationResult={confirmationResult}
-            onSuccess={onClose}
+            onSessionToken={completeLogin}
           />
         )}
+
+        {error ? <p className="text-sm text-red-400 mt-3 text-center">{error}</p> : null}
 
         {/* ✅ Container MUST be outside conditional rendering to stay in DOM */}
         <div id="recaptcha-container"></div>

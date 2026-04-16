@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { signInWithPopup } from "firebase/auth";
 
 export default function Signin({ 
   onSendOtp = () => {}, 
@@ -8,7 +7,6 @@ export default function Signin({
 }) {
   const [phone, setPhone] = useState("");
 
-  console.log("Signin props:", { onGoogleSignin });
   const handleSubmit = (e) => {
     e.preventDefault(); // stop page reload
     const phoneRegex = /^(?:\+91|0)?[6-9]\d{9}$/;
@@ -21,7 +19,7 @@ export default function Signin({
       alert("Enter a valid Indian mobile number");
       return;
     }
-    console.log("Signin submit clicked", phone);
+
     onSendOtp(phone.replace(/\D/g, ""));
   };
 
@@ -41,7 +39,6 @@ export default function Signin({
           <input
             value={phone}
             onChange={(e) => {
-              console.log(e.target.value);
               setPhone(e.target.value);
             }}
             required
@@ -66,7 +63,6 @@ export default function Signin({
           <button
             type="button"
             onClick={() => {
-              console.log("Clicked");
               if (onGoogleSignin) {
                 onGoogleSignin();
               } else {

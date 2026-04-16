@@ -1,63 +1,22 @@
-// src/App.jsx
-
-import { useEffect } from "react";
-import { onAuthStateChanged } from "firebase/auth";
-
-import { Routes, Route } from "react-router-dom";
-import {
-  Navbar,
-  Hero,
-  WhyAISection,
-  DestinationsGrid,
-  TripPlannerForm,
-  Footer,
-} from "./components/index";
+import { Navigate, Route, Routes } from "react-router-dom";
+import ProtectedRoute from "./components/ProtectedRoute";
+import LandingPage from "./pages/LandingPage";
+import DashboardPage from "./pages/DashboardPage";
+import EditProfilePage from "./pages/EditProfilePage";
+import SavedItinerariesPage from "./pages/SavedItinerariesPage";
 
 export default function App() {
-  
-  // useEffect(() => {
-  //    const unsubscribe = onAuthStateChanged(/*auth*/(user) => {
-  //     if (user) {
-  //       console.log("Logged in:", user.displayName);
-  //     } else {
-  //       console.log("Logged out");
-  //     }
-  //   });
-
-  //   return unsubscribe;
-  // }, []);
-
   return (
-    <>
-      <div className="min-h-screen bg-slate-950 text-white">
-        <Navbar />
+    <Routes>
+      <Route path="/" element={<LandingPage />} />
 
-        <section id="home">
-          {" "}
-          {/* ← Home */}
-          <Hero />
-        </section>
+      <Route element={<ProtectedRoute />}>
+        <Route path="/dashboard" element={<DashboardPage />} />
+        <Route path="/dashboard/itineraries" element={<SavedItinerariesPage />} />
+        <Route path="/profile/edit" element={<EditProfilePage />} />
+      </Route>
 
-        <section id="why-ai">
-          {" "}
-          {/* ← How It Works */}
-          <WhyAISection />
-        </section>
-
-        <section id="destinations">
-          {" "}
-          {/* ← Destinations */}
-          <DestinationsGrid />
-        </section>
-
-        <section id="plan-trip">
-          {" "}
-          {/* ← Plan Trip */}
-          <TripPlannerForm />
-        </section>
-
-        <Footer />
-      </div>
-    </>
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   );
 }

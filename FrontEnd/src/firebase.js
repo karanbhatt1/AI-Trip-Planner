@@ -12,7 +12,21 @@ appId : import.meta.env.VITE_APPID,
 measurementId: import.meta.env.VITE_MEASUREMENTID
 };
 
+const requiredFirebaseEnv = [
+	"VITE_FIREBASEAPI",
+	"VITE_AUTHDOMAIN",
+	"VITE_PROJECTID",
+	"VITE_STORAGEBUCKET",
+	"VITE_MESSAGINGSENDERID",
+	"VITE_APPID",
+];
+
+for (const key of requiredFirebaseEnv) {
+	if (!import.meta.env[key]) {
+		throw new Error(`Missing required Firebase env variable: ${key}`);
+	}
+}
+
 const app = initializeApp(firebaseConfig);
-console.log("Firebase config:", firebaseConfig);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();

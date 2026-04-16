@@ -15,7 +15,7 @@ export default function WhyAISection() {
         <div className="grid md:grid-cols-3 gap-8">
           {features.map((text, i) => (
             <div key={i} className="bg-slate-800 border border-slate-700 rounded-2xl p-8 flex items-start gap-4 hover:border-teal-500/50 transition">
-              <div className="w-10 h-10 bg-teal-500/20 rounded-full flex items-center justify-center flex-shrink-0">
+              <div className="w-10 h-10 bg-teal-500/20 rounded-full flex items-center justify-center shrink-0">
                 <svg className="w-6 h-6 text-teal-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                 </svg>

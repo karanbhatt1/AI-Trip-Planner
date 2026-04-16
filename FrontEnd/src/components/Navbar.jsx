@@ -1,8 +1,9 @@
 // src/components/Navbar.jsx
 import { Mountain } from "lucide-react";
 import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import {AuthModal} from './index'
+import { useAuth } from "../context/AuthContext";
 
 
 
@@ -33,6 +34,8 @@ import {AuthModal} from './index'
 export default function Navbar() {
   const [showAuth, setShowAuth] = useState(false);
   const [activeSection, setActiveSection] = useState("home");
+  const { isAuthenticated, isInitializing, logout } = useAuth();
+  const navigate = useNavigate();
   // const [openSignin, setOpenSignin] = useState(false);
 
 //   useEffect(() => {
@@ -49,6 +52,18 @@ export default function Navbar() {
     }
   };
 
+
+  useEffect(() => {
+    if (isInitializing || isAuthenticated) {
+      return undefined;
+    }
+
+    const authPopupTimer = window.setTimeout(() => {
+      setShowAuth(true);
+    }, 10000);
+
+    return () => window.clearTimeout(authPopupTimer);
+  }, [isInitializing, isAuthenticated]);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -114,20 +129,40 @@ export default function Navbar() {
           </nav>
 
           <div className="flex gap-3">
-            {/* <button
-              onClick={() => setOpenSignin(true)}
-              className="px-4 py-2 text-sm border border-slate-500 rounded-lg hover:border-teal-400"
-            >
-              Sign In
-            </button> 
-            */}
-            <button onClick={() => setShowAuth(true)} className="bg-transparent border-teal-600/75 border-2 p-2 rounded-xl cursor-pointer">Signin</button>
-            <a
-              onClick={(e) => scrollToSection(e, "plan-trip")}
-              className="px-5 py-2 bg-teal-500 text-slate-900 rounded-lg font-medium hover:bg-teal-400 transition"
-            >
-              Get Started
-            </a>
+            {isAuthenticated ? (
+              <>
+                <button
+                  onClick={() => navigate('/dashboard')}
+                  className="bg-transparent border-teal-600/75 border-2 p-2 rounded-xl cursor-pointer"
+                >
+                  Dashboard
+                </button>
+                <button
+                  onClick={async () => {
+                    await logout();
+                    navigate('/');
+                  }}
+                  className="px-5 py-2 bg-red-500 text-white rounded-lg font-medium hover:bg-red-400 transition cursor-pointer"
+                >
+                  Logout
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => setShowAuth(true)}
+                  className="bg-transparent border-teal-600/75 border-2 p-2 rounded-xl cursor-pointer"
+                >
+                  Signin
+                </button>
+                <button
+                  onClick={(e) => scrollToSection(e, "plan-trip")}
+                  className="px-5 py-2 bg-teal-500 text-slate-900 rounded-lg font-medium hover:bg-teal-400 transition cursor-pointer"
+                >
+                  Get Started
+                </button>
+              </>
+            )}
           </div>
         </div>
       </header>
