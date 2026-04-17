@@ -4,6 +4,8 @@ import { ApiError, apiRequest } from "../services/apiClient";
 import { useAuth } from "../context/AuthContext";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Toast from "../components/Toast";
+import RouteVisualizerSection from "../components/RouteVisualizerSection";
+import ItineraryDisplay from "../components/ItineraryDisplay";
 
 function formatDate(value) {
   if (!value) return "N/A";
@@ -323,7 +325,7 @@ export default function SavedItinerariesPage() {
                   onClick={() => openTrip(trip)}
                   className="mt-4 w-full rounded-lg border border-teal-500/50 bg-teal-500/10 px-3 py-2 text-sm text-teal-200 hover:bg-teal-500/20 transition cursor-pointer"
                 >
-                  Open Itinerary
+                  View Full Itinerary & Route
                 </button>
 
                 <div className="mt-2 grid grid-cols-2 gap-2">
@@ -381,6 +383,12 @@ export default function SavedItinerariesPage() {
               >
                 Delete Itinerary
               </button>
+              <div className="flex-1">
+                <p className="text-slate-500 text-sm mb-2">Itinerary Preview</p>
+                <div className="text-slate-200 text-sm leading-7 whitespace-pre-wrap bg-slate-950/60 p-3 rounded-lg border border-slate-700 max-h-48 overflow-y-auto">
+                  {selectedTrip.itinerary ? selectedTrip.itinerary.substring(0, 300) + '...' : 'No itinerary available'}
+                </div>
+              </div>
             </div>
 
             {tripActionError ? <p className="mb-4 text-sm text-red-400">{tripActionError}</p> : null}
@@ -539,6 +547,11 @@ export default function SavedItinerariesPage() {
                     {selectedTrip.itinerary || 'Detailed itinerary is not available yet.'}
                   </p>
                 </div>
+                
+                {/* Route Visualization Section */}
+                {selectedTrip.itinerary && (
+                  <RouteVisualizerSection tripData={selectedTrip} showTitle={true} />
+                )}
               </div>
             ) : null}
           </div>

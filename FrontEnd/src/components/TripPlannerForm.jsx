@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Sparkles, Calendar, Users, IndianRupee, MapPin, MessageCircle } from 'lucide-react';
+import { Sparkles, Calendar, Users, IndianRupee, MapPin, MessageCircle, Navigation } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { ApiError, apiRequest } from '../services/apiClient';
 import ConfirmDialog from './ConfirmDialog';
 import Toast from './Toast';
+import ItineraryDisplay from './ItineraryDisplay';
+import RouteVisualizerSection from './RouteVisualizerSection';
 
 export default function TripPlannerForm() {
   const { isAuthenticated, isInitializing, token, user } = useAuth();
@@ -16,6 +18,8 @@ export default function TripPlannerForm() {
   const [selectedDestinations, setSelectedDestinations] = useState([]);
   const [customDestination, setCustomDestination] = useState('');
   const [specialRequirements, setSpecialRequirements] = useState('');
+  const [startingPosition, setStartingPosition] = useState('');
+  const [isLocating, setIsLocating] = useState(false);
   const [formError, setFormError] = useState('');
   const [formSuccess, setFormSuccess] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -44,6 +48,7 @@ export default function TripPlannerForm() {
     destinations: '',
     specialRequirements: '',
   });
+  const [itineraryViewMode, setItineraryViewMode] = useState('structured'); // 'structured' or 'raw'
 
   const formatDateInput = (date) => {
     const year = date.getFullYear();
@@ -79,6 +84,39 @@ export default function TripPlannerForm() {
     const start = new Date(`${startDateValue}T00:00:00`);
     start.setDate(start.getDate() + 2);
     return formatDateInput(start);
+  };
+
+  const getCurrentLocation = async () => {
+    setIsLocating(true);
+    setFormError('');
+    
+    if (!navigator.geolocation) {
+      setFormError('Geolocation is not supported by your browser. Please enter your location manually.');
+      setIsLocating(false);
+      return;
+    }
+    
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        setStartingPosition(`${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
+        setFormSuccess(`Location detected: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
+        setIsLocating(false);
+      },
+      (error) => {
+        let errorMsg = 'Unable to get your location.';
+        if (error.code === error.PERMISSION_DENIED) {
+          errorMsg = 'Location permission denied. Please enter your location manually or enable location access.';
+        } else if (error.code === error.POSITION_UNAVAILABLE) {
+          errorMsg = 'Location information is unavailable. Please enter your location manually.';
+        } else if (error.code === error.TIMEOUT) {
+          errorMsg = 'Location request timed out. Please enter your location manually.';
+        }
+        setFormError(errorMsg);
+        setIsLocating(false);
+      },
+      { timeout: 10000, enableHighAccuracy: false }
+    );
   };
 
   const handleStartDateChange = (event) => {
@@ -333,6 +371,7 @@ export default function TripPlannerForm() {
             interests: selectedInterests,
             destinations: normalizedDestinations,
             specialRequirements,
+            startingPosition,
           },
         });
 
@@ -524,7 +563,7 @@ export default function TripPlannerForm() {
                       onClick={() => {
                         setEditingTripId('');
                         setSelectedTripDetails(trip);
-                        setSelectedTripView('summary');
+                        setSelectedTripView('structured');
                       }}
                       className="mt-3 w-full rounded-lg border border-teal-500/50 bg-teal-500/10 px-3 py-2 text-sm text-teal-200 hover:bg-teal-500/20 transition cursor-pointer"
                     >
@@ -669,6 +708,28 @@ export default function TripPlannerForm() {
                 className="mt-3 w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:border-teal-500 outline-none transition"
               />
             ) : null}
+          </div>
+
+          <div className="mb-10">
+            <label className="flex items-center gap-2 text-sm text-slate-300 mb-2"><MapPin className="w-4 h-4" /> Starting Position</label>
+            <div className="flex gap-3">
+              <input
+                type="text"
+                value={startingPosition}
+                onChange={(event) => setStartingPosition(event.target.value)}
+                placeholder="Enter your starting location (e.g., latitude, longitude or city name)"
+                className="flex-1 px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:border-teal-500 outline-none transition"
+              />
+              <button
+                type="button"
+                onClick={getCurrentLocation}
+                disabled={isLocating}
+                className="flex items-center gap-2 px-4 py-3 bg-teal-500/20 border border-teal-500/50 text-teal-200 rounded-lg hover:bg-teal-500/30 transition disabled:opacity-60"
+              >
+                <Navigation className="w-4 h-4" />
+                {isLocating ? 'Locating...' : 'Auto-detect'}
+              </button>
+            </div>
           </div>
 
           <div className="mb-10">
@@ -838,18 +899,36 @@ export default function TripPlannerForm() {
                 </div>
               ) : savedTrip.itinerary ? (
                 <div className="mt-4 rounded-xl border border-slate-700 bg-slate-950/60 p-4">
-                  <p className="text-slate-500 mb-2">Itinerary Preview</p>
-                  <textarea
-                    value={editableSavedItinerary}
-                    onChange={(e) => setEditableSavedItinerary(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-slate-200 text-sm leading-7 focus:border-teal-500 outline-none transition resize-vertical"
-                    rows={8}
-                    placeholder="Edit your itinerary here..."
-                  />
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-slate-500">Itinerary Preview</p>
+                    <button
+                      type="button"
+                      onClick={() => setItineraryViewMode(itineraryViewMode === 'structured' ? 'raw' : 'structured')}
+                      className="text-xs text-teal-400 hover:text-teal-300 transition"
+                    >
+                      {itineraryViewMode === 'structured' ? 'Edit Raw' : 'View Structured'}
+                    </button>
+                  </div>
+                  {itineraryViewMode === 'structured' ? (
+                    <ItineraryDisplay itineraryText={editableSavedItinerary} />
+                  ) : (
+                    <textarea
+                      value={editableSavedItinerary}
+                      onChange={(e) => setEditableSavedItinerary(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-slate-200 text-sm leading-7 focus:border-teal-500 outline-none transition resize-vertical"
+                      rows={8}
+                      placeholder="Edit your itinerary here..."
+                    />
+                  )}
                 </div>
               ) : null}
             </div>
           ) : null}
+
+          {/* Route Visualization */}
+          {savedTrip?.itinerary && (
+            <RouteVisualizerSection tripData={savedTrip} showTitle={true} />
+          )}
 
           <button type="submit" disabled={isSubmitting || isItineraryGenerated || isGeneratingItinerary} className="w-full py-5 bg-teal-500 text-slate-900 font-bold text-lg rounded-xl hover:bg-teal-400 transition shadow-lg flex items-center justify-center gap-3 disabled:opacity-60 disabled:cursor-not-allowed">
             <Sparkles className="w-6 h-6" />
@@ -1058,10 +1137,25 @@ export default function TripPlannerForm() {
                 ) : null}
 
                 <div className="rounded-xl border border-slate-700 bg-slate-950/60 p-4">
-                  <p className="text-slate-500 text-sm mb-2">Itinerary</p>
-                  <p className="text-slate-200 text-sm leading-7 whitespace-pre-wrap">
-                    {selectedTripDetails.itinerary || 'Detailed itinerary is not available yet.'}
-                  </p>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-slate-500 text-sm">Itinerary</p>
+                    {selectedTripDetails.itinerary && (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedTripView(selectedTripView === 'structured' ? 'raw' : 'structured')}
+                        className="text-xs text-teal-400 hover:text-teal-300 transition"
+                      >
+                        {selectedTripView === 'structured' ? 'View Raw' : 'View Structured'}
+                      </button>
+                    )}
+                  </div>
+                  {selectedTripView === 'structured' && selectedTripDetails.itinerary ? (
+                    <ItineraryDisplay itineraryText={selectedTripDetails.itinerary} />
+                  ) : (
+                    <p className="text-slate-200 text-sm leading-7 whitespace-pre-wrap">
+                      {selectedTripDetails.itinerary || 'Detailed itinerary is not available yet.'}
+                    </p>
+                  )}
                 </div>
               </div>
             ) : null}

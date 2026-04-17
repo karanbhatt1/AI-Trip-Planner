@@ -1,6 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { ApiError, apiRequest } from "../services/apiClient";
+import { useToast } from "./ToastContext";
 
 const SESSION_KEY = "sessionToken";
 const AuthContext = createContext(null);
@@ -9,6 +10,7 @@ export function AuthProvider({ children }) {
   const [token, setToken] = useState(() => localStorage.getItem(SESSION_KEY));
   const [user, setUser] = useState(null);
   const [isInitializing, setIsInitializing] = useState(true);
+  const { showToast } = useToast();
 
   const clearSession = useCallback(() => {
     localStorage.removeItem(SESSION_KEY);
@@ -40,8 +42,9 @@ export function AuthProvider({ children }) {
       }
 
       clearSession();
+      showToast('success', 'Logged Out', 'You have been logged out successfully.');
     },
-    [clearSession]
+    [clearSession, showToast]
   );
 
   const loginWithSessionToken = useCallback(
@@ -51,9 +54,10 @@ export function AuthProvider({ children }) {
 
       const profile = await fetchProfile(sessionToken);
       setUser(profile);
+      showToast('success', 'Logged In', 'Welcome back! You have been logged in successfully.');
       return profile;
     },
-    [fetchProfile]
+    [fetchProfile, showToast]
   );
 
   const refreshProfile = useCallback(async () => {
@@ -107,6 +111,19 @@ export function AuthProvider({ children }) {
 
     bootstrapAuth();
   }, [token, fetchProfile, clearSession]);
+
+  // Automatic logout when user closes the website
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      clearSession();
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [clearSession]);
 
   const value = useMemo(
     () => ({
