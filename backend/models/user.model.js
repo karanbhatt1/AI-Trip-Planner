@@ -1,25 +1,62 @@
 import mongoose from "mongoose";
 
 const userSchema = new mongoose.Schema({
+    firebaseUid: {
+        type: String,
+        unique: true,
+        sparse: true,
+        index: true
+    },
     username:{
         type:String,   
-        required: true
+        required: true,
+        trim: true
     },
     phone:{ 
-        type: Number,
-        required: true,
-        unique: true
+        type: String,
+        trim: true
     },
     email:{
         type: String,
-        required: true,
-        unique: true
+        lowercase: true,
+        trim: true
+    },
+    profilePicture: {
+        type: String,
+        default: null,
+        trim: true
+    },
+    lastLoginAt: {
+        type: Date,
+        default: Date.now
     },
     createdAt:{
         type: Date,
         default: Date.now
     }
 })
+
+// Unique only when a non-empty string is present.
+userSchema.index(
+    { phone: 1 },
+    {
+        unique: true,
+        partialFilterExpression: {
+            phone: { $type: "string", $ne: "" }
+        }
+    }
+)
+
+// Unique only when a non-empty string is present.
+userSchema.index(
+    { email: 1 },
+    {
+        unique: true,
+        partialFilterExpression: {
+            email: { $type: "string", $ne: "" }
+        }
+    }
+)
 
 const User = mongoose.model("User",userSchema)
 export default User;      

@@ -8,6 +8,18 @@ export const registerUser = async (req, res) => {
             return res.status(400).json({ error: "All fields are required" });
         }
 
+        if (typeof username !== "string" || username.trim().length < 2) {
+            return res.status(400).json({ error: "username must be at least 2 characters" });
+        }
+
+        if (!/^\S+@\S+\.\S+$/.test(String(email))) {
+            return res.status(400).json({ error: "Invalid email format" });
+        }
+
+        if (!/^\d{10,15}$/.test(String(phone))) {
+            return res.status(400).json({ error: "Invalid phone format" });
+        }
+
         const existingUser = await User.findOne({ $or: [{ email }, { phone }] });
         if (existingUser) {
             return res.status(400).json({ error: "User already exists" });
