@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import Signin from "./Signin";
 import OtpProcess from "./OtpProcess";
+import { ApiError, apiRequest } from "../../services/apiClient";
 // Import the initialized auth from your firebase.js
 import { auth, googleProvider } from "../../firebase";
 import {
@@ -10,8 +11,6 @@ import {
 } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
-
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
 
 export default function AuthModal({ onClose }) {
   const [step, setStep] = useState("signin");
@@ -59,16 +58,10 @@ export default function AuthModal({ onClose }) {
       const result = await signInWithPopup(auth, googleProvider);
       const user = result.user;
       const token = await user.getIdToken();
-      const response = await fetch(`${BACKEND_URL}/api/auth/verify`, {
+      const data = await apiRequest("/api/auth/verify", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token }),
+        body: { token },
       });
-
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to verify sign-in");
-      }
 
       if (data.sessionToken) {
         await completeLogin(data.sessionToken);
@@ -77,6 +70,10 @@ export default function AuthModal({ onClose }) {
       console.log("Welcome:", result.user.displayName);
     } catch (error) {
       console.error("Google Auth Error:", error);
+      if (error instanceof ApiError) {
+        setError(error.message || "Google sign-in verification failed");
+        return;
+      }
       setError(error.message || "Google sign-in failed");
     }
   };

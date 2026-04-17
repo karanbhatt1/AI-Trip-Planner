@@ -90,6 +90,21 @@ export function AuthProvider({ children }) {
     []
   );
 
+  const deleteAccount = useCallback(async () => {
+    const activeToken = localStorage.getItem(SESSION_KEY);
+    if (!activeToken) {
+      throw new ApiError("No active session", 401, null);
+    }
+
+    await apiRequest("/api/auth/account", {
+      method: "DELETE",
+      token: activeToken,
+    });
+
+    clearSession();
+    showToast("success", "Account Deleted", "Your account has been deleted successfully.");
+  }, [clearSession, showToast]);
+
   useEffect(() => {
     const bootstrapAuth = async () => {
       if (!token) {
@@ -135,8 +150,9 @@ export function AuthProvider({ children }) {
       logout,
       refreshProfile,
       updateProfile,
+      deleteAccount,
     }),
-    [token, user, isInitializing, loginWithSessionToken, logout, refreshProfile, updateProfile]
+    [token, user, isInitializing, loginWithSessionToken, logout, refreshProfile, updateProfile, deleteAccount]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

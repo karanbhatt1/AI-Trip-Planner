@@ -5,6 +5,18 @@ import { useNavigate } from "react-router-dom";
 import {AuthModal} from './index'
 import { useAuth } from "../context/AuthContext";
 
+function getInitials(name, email) {
+  const base = (name || email || "U").trim();
+  if (!base) {
+    return "U";
+  }
+  const parts = base.split(" ").filter(Boolean);
+  if (parts.length >= 2) {
+    return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+  }
+  return base.slice(0, 2).toUpperCase();
+}
+
 
 
 // function SigninModal({ onClose }) {
@@ -34,7 +46,7 @@ import { useAuth } from "../context/AuthContext";
 export default function Navbar() {
   const [showAuth, setShowAuth] = useState(false);
   const [activeSection, setActiveSection] = useState("home");
-  const { isAuthenticated, isInitializing, logout } = useAuth();
+  const { isAuthenticated, isInitializing, logout, user } = useAuth();
   const navigate = useNavigate();
   // const [openSignin, setOpenSignin] = useState(false);
 
@@ -133,9 +145,20 @@ export default function Navbar() {
               <>
                 <button
                   onClick={() => navigate('/dashboard')}
-                  className="bg-transparent border-teal-600/75 border-2 p-2 rounded-xl cursor-pointer"
+                  title="Open dashboard"
+                  className="w-11 h-11 rounded-full border-2 border-teal-500/70 overflow-hidden flex items-center justify-center bg-slate-900 hover:border-teal-400 transition cursor-pointer"
                 >
-                  Dashboard
+                  {user?.profilePicture ? (
+                    <img
+                      src={user.profilePicture}
+                      alt="Profile"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <span className="text-xs font-bold text-teal-300">
+                      {getInitials(user?.username, user?.email)}
+                    </span>
+                  )}
                 </button>
                 <button
                   onClick={async () => {

@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { auth } from "../../firebase";
 import { signInWithPhoneNumber } from "firebase/auth";
-
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
+import { ApiError, apiRequest } from "../../services/apiClient";
 
 export default function OtpProcess({ phone, confirmationResult, onSessionToken }) {
   const [otp, setOtp] = useState("");
@@ -29,18 +28,10 @@ export default function OtpProcess({ phone, confirmationResult, onSessionToken }
 
     console.log("User logged in:", user);
 
-    const response = await fetch(`${BACKEND_URL}/api/auth/verify`, {
+    const data = await apiRequest("/api/auth/verify", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ token }),
+      body: { token },
     });
-
-    const data = await response.json();
-    if (!response.ok) {
-      throw new Error(data.error || "Failed to verify OTP");
-    }
 
     if (data.sessionToken) {
       await onSessionToken?.(data.sessionToken);
@@ -50,6 +41,10 @@ export default function OtpProcess({ phone, confirmationResult, onSessionToken }
 
   } catch (error) {
     console.error(error);
+    if (error instanceof ApiError) {
+      setError(error.message || "OTP verification failed");
+      return;
+    }
     setError(error.message || "Invalid OTP");
   } finally {
     setIsVerifying(false);
