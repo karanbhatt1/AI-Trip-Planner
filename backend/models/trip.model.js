@@ -30,9 +30,26 @@ const tripSchema = new mongoose.Schema({
     specialRequirements: {
         type: String
     },
+    startingPosition: {
+        type: String
+    },
+    startingCoordinates: {
+        type: String
+    },
     itinerary: {
         type: String // AI-generated itinerary
     },
+    itineraryStructured: {
+        type: mongoose.Schema.Types.Mixed,
+        default: null
+    },
+    checkpoints: [{
+        time: { type: String },
+        title: { type: String },
+        description: { type: String },
+        location: { type: String },
+        notes: { type: String }
+    }],
     createdAt: {
         type: Date,
         default: Date.now

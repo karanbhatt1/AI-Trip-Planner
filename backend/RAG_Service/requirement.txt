@@ -1,0 +1,17 @@
+langchain
+langchain-core
+langchain-community
+langchain-openai
+langchain-chroma
+chromadb
+fastapi
+uvicorn
+sentence-transformers
+jq
+openai
+tiktoken
+langchain-text-splitters
+langchain-huggingface
+langchain-google-genai
+langchain-groq 
+pydantic
