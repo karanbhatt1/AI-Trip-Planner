@@ -4,7 +4,7 @@ import RouteMap from './RouteMap';
 import RouteSidebar from './RouteSidebar';
 import { apiRequest } from '../services/apiClient';
 
-const RoutePlanner = ({ tripData }) => {
+const RoutePlanner = ({ tripData, startingLocation = null, compact = false }) => {
   const [checkpoints, setCheckpoints] = useState([]);
   const [routeSummary, setRouteSummary] = useState(null);
   const [selectedCheckpoint, setSelectedCheckpoint] = useState(null);
@@ -26,17 +26,21 @@ const RoutePlanner = ({ tripData }) => {
       // Extract places from trip data
       const places = extractPlacesFromTrip(data);
 
-      if (places.length < 2) {
+      if ((!startingLocation && places.length < 2) || (startingLocation && places.length < 1)) {
         throw new Error('Need at least 2 places to create a route');
       }
+
+      const sourcePoint = startingLocation || places[0];
+      const destinationPoint = places[places.length - 1];
+      const waypointPoints = startingLocation ? places : places.slice(1, -1);
 
       // Call backend API to get optimized route
       const response = await apiRequest('/api/route', {
         method: 'POST',
         body: {
-          source: places[0],
-          destination: places[places.length - 1],
-          waypoints: places.slice(1, -1),
+          source: sourcePoint,
+          destination: destinationPoint,
+          waypoints: waypointPoints,
           preferences: data.preferences || {}
         }
       });
@@ -173,23 +177,26 @@ const RoutePlanner = ({ tripData }) => {
             checkpoints={checkpoints}
             onCheckpointClick={handleCheckpointClick}
             selectedCheckpoint={selectedCheckpoint}
+            startingLocation={startingLocation}
+            mapHeight={compact ? 'h-72' : 'h-96'}
           />
         </div>
 
         {/* Sidebar */}
-        <div className="lg:col-span-1">
+        <div className={`lg:col-span-1 ${compact ? 'hidden lg:block' : ''}`}>
           <RouteSidebar
             checkpoints={checkpoints}
             routeSummary={routeSummary}
             selectedCheckpoint={selectedCheckpoint}
             onCheckpointClick={handleCheckpointClick}
             isLoading={isLoading}
+            startingLocation={startingLocation}
           />
         </div>
       </div>
 
       {/* Route Stats */}
-      {routeSummary && (
+      {routeSummary && !compact && (
         <div className="bg-slate-800/60 border border-slate-700 rounded-xl p-6">
           <h3 className="text-xl font-bold text-white mb-4">Route Statistics</h3>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

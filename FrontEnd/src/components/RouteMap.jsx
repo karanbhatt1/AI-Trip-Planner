@@ -13,7 +13,7 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
 });
 
-const RouteMap = ({ checkpoints, onCheckpointClick, selectedCheckpoint, startingLocation }) => {
+const RouteMap = ({ checkpoints, onCheckpointClick, selectedCheckpoint, startingLocation, mapHeight = 'h-96' }) => {
   const [map, setMap] = useState(null);
   const [routingControl, setRoutingControl] = useState(null);
 
@@ -111,6 +111,31 @@ const RouteMap = ({ checkpoints, onCheckpointClick, selectedCheckpoint, starting
     });
   };
 
+  const createStartIcon = () =>
+    L.divIcon({
+      className: 'custom-start-marker',
+      html: `
+        <div style="
+          background-color: #0f172a;
+          border: 3px solid #14b8a6;
+          border-radius: 9999px;
+          width: 34px;
+          height: 34px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: #14b8a6;
+          font-weight: 700;
+          font-size: 11px;
+          box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+        ">
+          YOU
+        </div>
+      `,
+      iconSize: [34, 34],
+      iconAnchor: [17, 17],
+    });
+
   if (!checkpoints || checkpoints.length === 0) {
     return (
       <div className="w-full h-96 bg-slate-800 rounded-lg flex items-center justify-center">
@@ -128,7 +153,7 @@ const RouteMap = ({ checkpoints, onCheckpointClick, selectedCheckpoint, starting
   }
 
   return (
-    <div className="w-full h-96 rounded-lg overflow-hidden border border-slate-700">
+    <div className={`w-full ${mapHeight} rounded-lg overflow-hidden border border-slate-700`}>
       <MapContainer
         center={getCenter()}
         zoom={10}
@@ -139,6 +164,20 @@ const RouteMap = ({ checkpoints, onCheckpointClick, selectedCheckpoint, starting
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
+
+        {startingLocation ? (
+          <Marker position={[startingLocation.lat, startingLocation.lng]} icon={createStartIcon()}>
+            <Popup>
+              <div className="p-2">
+                <h3 className="font-bold text-base">Current Location</h3>
+                <p className="text-sm text-gray-600 mt-1">{startingLocation.name || 'Detected location'}</p>
+                <div className="mt-2 text-xs text-gray-500">
+                  Lat: {startingLocation.lat.toFixed(4)}, Lng: {startingLocation.lng.toFixed(4)}
+                </div>
+              </div>
+            </Popup>
+          </Marker>
+        ) : null}
 
         {checkpoints.map((checkpoint, index) => (
           <Marker

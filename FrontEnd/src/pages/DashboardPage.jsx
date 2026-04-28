@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { ApiError } from "../services/apiClient";
+import { apiRequest } from "../services/apiClient";
 
 function getInitials(name, email) {
   const base = name || email || "U";
@@ -13,10 +14,11 @@ function getInitials(name, email) {
 }
 
 export default function DashboardPage() {
-  const { user, logout, refreshProfile } = useAuth();
+  const { user, token, logout, refreshProfile } = useAuth();
   const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
+  const [recentTrips, setRecentTrips] = useState([]);
 
   useEffect(() => {
     const loadProfile = async () => {
@@ -39,6 +41,23 @@ export default function DashboardPage() {
 
     loadProfile();
   }, [refreshProfile, logout, navigate]);
+
+  useEffect(() => {
+    const loadRecentTrips = async () => {
+      if (!user?.firebaseUid || !token) {
+        return;
+      }
+
+      try {
+        const response = await apiRequest(`/api/v1/trip/user/${user.firebaseUid}`, { token });
+        setRecentTrips(Array.isArray(response) ? response.slice(0, 3) : []);
+      } catch {
+        setRecentTrips([]);
+      }
+    };
+
+    loadRecentTrips();
+  }, [user?.firebaseUid, token]);
 
   const handleLogout = async () => {
     await logout();
@@ -127,6 +146,44 @@ export default function DashboardPage() {
               <h3 className="font-semibold text-lg">Saved Itineraries</h3>
               <p className="text-sm text-slate-400 mt-1">See every trip you have already saved.</p>
             </Link>
+          </div>
+
+          <div className="mt-8 rounded-2xl border border-slate-700 bg-slate-900/60 p-5">
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <div>
+                <h2 className="text-xl font-semibold">Recent Saved Itineraries</h2>
+                <p className="text-sm text-slate-400 mt-1">Open a trip to review its day cards and edit checkpoints.</p>
+              </div>
+              <Link
+                to="/dashboard/itineraries"
+                className="px-4 py-2 rounded-lg border border-teal-500 text-teal-300 hover:bg-teal-500/10 transition"
+              >
+                View All
+              </Link>
+            </div>
+
+            {recentTrips.length > 0 ? (
+              <div className="grid gap-4 md:grid-cols-3">
+                {recentTrips.map((trip) => (
+                  <Link
+                    key={trip._id}
+                    to="/dashboard/itineraries"
+                    className="rounded-xl border border-slate-700 bg-slate-950/60 p-4 hover:border-teal-500 transition"
+                  >
+                    <p className="text-xs text-teal-300 mb-2">{trip.budget || "Trip"}</p>
+                    <h3 className="font-semibold text-white">{trip.destinations?.[0] || "Saved itinerary"}</h3>
+                    <p className="text-xs text-slate-400 mt-2">
+                      {trip.startDate ? new Date(trip.startDate).toLocaleDateString() : "N/A"} → {trip.endDate ? new Date(trip.endDate).toLocaleDateString() : "N/A"}
+                    </p>
+                    <p className="text-xs text-slate-500 mt-2 max-h-16 overflow-hidden">
+                      {trip.itinerary || "Open to edit structured day cards and checkpoints."}
+                    </p>
+                  </Link>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-slate-400">No saved itineraries yet.</p>
+            )}
           </div>
         </div>
       </div>

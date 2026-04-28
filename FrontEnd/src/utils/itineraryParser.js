@@ -184,3 +184,113 @@ export function highlightPlaces(text, places) {
 
   return highlightedText;
 }
+
+const parseActivityLine = (activityLine = '') => {
+  const timeMatch = activityLine.match(/^(\d{1,2}:\d{2}\s*(?:AM|PM)?):\s*(.+?)\s*-\s*(.+)$/i);
+  if (timeMatch) {
+    return {
+      time: timeMatch[1],
+      title: timeMatch[2],
+      description: timeMatch[3],
+    };
+  }
+
+  return {
+    time: '',
+    title: activityLine,
+    description: '',
+  };
+};
+
+const sanitizeCheckpoint = (checkpoint = {}, index = 0) => ({
+  time: typeof checkpoint.time === 'string' ? checkpoint.time : '',
+  title: typeof checkpoint.title === 'string' && checkpoint.title.trim() ? checkpoint.title : `Checkpoint ${index + 1}`,
+  description: typeof checkpoint.description === 'string' ? checkpoint.description : '',
+  location: typeof checkpoint.location === 'string' ? checkpoint.location : '',
+  notes: typeof checkpoint.notes === 'string' ? checkpoint.notes : '',
+});
+
+const sanitizeDay = (day = {}, index = 0) => ({
+  dayNumber: Number(day.dayNumber) || index + 1,
+  date: typeof day.date === 'string' ? day.date : '',
+  title: typeof day.title === 'string' && day.title.trim() ? day.title : `Day ${index + 1}`,
+  summary: typeof day.summary === 'string' ? day.summary : '',
+  checkpoints: Array.isArray(day.checkpoints)
+    ? day.checkpoints.map((cp, cpIndex) => sanitizeCheckpoint(cp, cpIndex))
+    : [],
+});
+
+export function normalizeStructuredItinerary(structured, fallbackText = '') {
+  if (structured && Array.isArray(structured.days)) {
+    return {
+      ...structured,
+      days: structured.days.map((day, index) => sanitizeDay(day, index)),
+    };
+  }
+
+  const parsedDays = parseItineraryText(fallbackText).map((day, index) => ({
+    dayNumber: index + 1,
+    date: '',
+    title: String(day.day || '').replace(/\*\*/g, '').trim() || `Day ${index + 1}`,
+    summary: day.description || '',
+    checkpoints: (day.activities || []).map((activity, cpIndex) => {
+      const parsed = parseActivityLine(activity);
+      return sanitizeCheckpoint(
+        {
+          time: parsed.time,
+          title: parsed.title,
+          description: parsed.description,
+          location: '',
+          notes: '',
+        },
+        cpIndex
+      );
+    }),
+  }));
+
+  return {
+    metadata: {},
+    days: parsedDays,
+  };
+}
+
+export function structuredToMarkdown(structured) {
+  const normalized = normalizeStructuredItinerary(structured, '');
+  const lines = ['Your Planned itinerary is', ''];
+
+  normalized.days.forEach((day, index) => {
+    const dayLabel = `Day ${day.dayNumber || index + 1}`;
+    const datePart = day.date ? `: ${day.date}` : '';
+    const titlePart = day.title ? ` - ${day.title}` : '';
+
+    lines.push(`**${dayLabel}${datePart}${titlePart}**`);
+    lines.push('');
+    lines.push('| Time | Activity | Description |');
+    lines.push('|------|----------|-------------|');
+
+    day.checkpoints.forEach((checkpoint) => {
+      const description = [checkpoint.description, checkpoint.location ? `(${checkpoint.location})` : '']
+        .filter(Boolean)
+        .join(' ')
+        .trim();
+
+      lines.push(
+        `| **${checkpoint.time || '-'}** | **${checkpoint.title || '-'}** | ${description || '-'} |`
+      );
+    });
+
+    if (day.summary) {
+      lines.push('');
+      lines.push(day.summary);
+    }
+
+    lines.push('');
+  });
+
+  return lines.join('\n').trim();
+}
+
+export function flattenCheckpoints(structured) {
+  const normalized = normalizeStructuredItinerary(structured, '');
+  return normalized.days.flatMap((day) => day.checkpoints || []);
+}

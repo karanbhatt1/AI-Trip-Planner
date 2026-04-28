@@ -6,6 +6,11 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import Toast from "../components/Toast";
 import RouteVisualizerSection from "../components/RouteVisualizerSection";
 import ItineraryDisplay from "../components/ItineraryDisplay";
+import {
+  flattenCheckpoints,
+  normalizeStructuredItinerary,
+  structuredToMarkdown,
+} from "../utils/itineraryParser";
 
 function formatDate(value) {
   if (!value) return "N/A";
@@ -26,6 +31,8 @@ export default function SavedItinerariesPage() {
   const [tripActionError, setTripActionError] = useState("");
   const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, tripId: null });
   const [toast, setToast] = useState({ isOpen: false, type: 'info', title: '', message: '' });
+  const [editableStructuredItinerary, setEditableStructuredItinerary] = useState(null);
+  const [editableSavedItinerary, setEditableSavedItinerary] = useState("");
   const [editTripForm, setEditTripForm] = useState({
     startDate: "",
     endDate: "",
@@ -62,6 +69,50 @@ export default function SavedItinerariesPage() {
   };
 
   const toCsv = (value) => (Array.isArray(value) ? value.join(", ") : "");
+
+  const getTripUpdatePayload = (trip, overrides = {}) => ({
+    startDate: trip.startDate ? formatDateInput(new Date(trip.startDate)) : "",
+    endDate: trip.endDate ? formatDateInput(new Date(trip.endDate)) : "",
+    travelers: String(trip.travelers ?? 1),
+    budget: trip.budget || "",
+    interests: Array.isArray(trip.interests) ? trip.interests : [],
+    destinations: Array.isArray(trip.destinations) ? trip.destinations : [],
+    specialRequirements: trip.specialRequirements || "",
+    ...overrides,
+  });
+
+  const saveStructuredItinerary = async (updatedStructured) => {
+    if (!selectedTrip?._id) {
+      return;
+    }
+
+    const normalized = normalizeStructuredItinerary(updatedStructured, editableSavedItinerary);
+    const markdown = structuredToMarkdown(normalized);
+    const checkpoints = flattenCheckpoints(normalized);
+
+    setEditableStructuredItinerary(normalized);
+    setEditableSavedItinerary(markdown);
+
+    try {
+      const response = await apiRequest(`/api/v1/trip/${selectedTrip._id}`, {
+        method: "PUT",
+        token,
+        body: getTripUpdatePayload(selectedTrip, {
+          itinerary: markdown,
+          itineraryStructured: normalized,
+          checkpoints,
+        }),
+      });
+
+      if (response?.trip) {
+        updateTripInState(response.trip);
+      }
+
+      setTripActionError("");
+    } catch (err) {
+      setTripActionError(err.message || "Failed to save itinerary changes.");
+    }
+  };
 
   useEffect(() => {
     const loadTrips = async () => {
@@ -105,12 +156,18 @@ export default function SavedItinerariesPage() {
     setSelectedTrip(trip);
     setSelectedView("summary");
     setTripActionError("");
+    setEditableSavedItinerary(trip.itinerary || "");
+    setEditableStructuredItinerary(
+      normalizeStructuredItinerary(trip.itineraryStructured, trip.itinerary || "")
+    );
   };
 
   const closeTrip = () => {
     setSelectedTrip(null);
     setEditingTripId("");
     setTripActionError("");
+    setEditableSavedItinerary("");
+    setEditableStructuredItinerary(null);
   };
 
   const openEditTrip = (trip) => {
@@ -118,6 +175,10 @@ export default function SavedItinerariesPage() {
     setSelectedView("details");
     setTripActionError("");
     setEditingTripId(trip._id);
+    setEditableSavedItinerary(trip.itinerary || "");
+    setEditableStructuredItinerary(
+      normalizeStructuredItinerary(trip.itineraryStructured, trip.itinerary || "")
+    );
     setEditTripForm({
       startDate: trip.startDate ? formatDateInput(new Date(trip.startDate)) : "",
       endDate: trip.endDate ? formatDateInput(new Date(trip.endDate)) : "",
@@ -543,9 +604,11 @@ export default function SavedItinerariesPage() {
 
                 <div className="rounded-xl border border-slate-700 bg-slate-950/60 p-4">
                   <p className="text-slate-500 text-sm mb-2">Itinerary</p>
-                  <p className="text-slate-200 text-sm leading-7 whitespace-pre-wrap">
-                    {selectedTrip.itinerary || 'Detailed itinerary is not available yet.'}
-                  </p>
+                  <ItineraryDisplay
+                    itineraryText={editableSavedItinerary}
+                    itineraryStructured={editableStructuredItinerary}
+                    onStructuredChange={saveStructuredItinerary}
+                  />
                 </div>
                 
                 {/* Route Visualization Section */}

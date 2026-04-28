@@ -1,24 +1,34 @@
-import { useState } from 'react';
-import { ChevronDown, ChevronRight, MapPin, Calendar, Clock, Info } from 'lucide-react';
-import { extractPlaces, highlightPlaces } from '../utils/itineraryParser';
+import { useEffect, useMemo, useState } from 'react';
+import { Calendar, ChevronDown, ChevronRight, Edit3, MapPin, Save, X } from 'lucide-react';
+import { normalizeStructuredItinerary } from '../utils/itineraryParser';
 
-export default function ItineraryDisplay({ itineraryText, className = '' }) {
-  const [expandedDays, setExpandedDays] = useState(new Set([0])); // First day expanded by default
-  const [selectedPlace, setSelectedPlace] = useState(null);
+export default function ItineraryDisplay({
+  itineraryText,
+  itineraryStructured,
+  onStructuredChange,
+  className = '',
+}) {
+  const [expandedDays, setExpandedDays] = useState(new Set([0]));
+  const [localStructured, setLocalStructured] = useState(
+    normalizeStructuredItinerary(itineraryStructured, itineraryText)
+  );
 
-  if (!itineraryText) {
-    return (
-      <div className={`text-center py-8 text-slate-400 ${className}`}>
-        <Calendar className="w-8 h-8 mx-auto mb-2 opacity-50" />
-        <p>No itinerary available</p>
-      </div>
-    );
-  }
+  useEffect(() => {
+    setLocalStructured(normalizeStructuredItinerary(itineraryStructured, itineraryText));
+  }, [itineraryStructured, itineraryText]);
 
-  // Parse the itinerary text
-  const days = parseItineraryText(itineraryText);
+  const days = useMemo(() => localStructured?.days || [], [localStructured]);
 
   if (!days.length) {
+    if (!itineraryText) {
+      return (
+        <div className={`text-center py-8 text-slate-400 ${className}`}>
+          <Calendar className="w-8 h-8 mx-auto mb-2 opacity-50" />
+          <p>No itinerary available</p>
+        </div>
+      );
+    }
+
     return (
       <div className={`text-slate-200 p-4 rounded-lg bg-slate-800/50 ${className}`}>
         <pre className="whitespace-pre-wrap text-sm leading-relaxed">{itineraryText}</pre>
@@ -27,330 +37,295 @@ export default function ItineraryDisplay({ itineraryText, className = '' }) {
   }
 
   const toggleDay = (index) => {
-    const newExpanded = new Set(expandedDays);
-    if (newExpanded.has(index)) {
-      newExpanded.delete(index);
+    const updated = new Set(expandedDays);
+    if (updated.has(index)) {
+      updated.delete(index);
     } else {
-      newExpanded.add(index);
+      updated.add(index);
     }
-    setExpandedDays(newExpanded);
+    setExpandedDays(updated);
   };
 
-  const handlePlaceClick = (place) => {
-    setSelectedPlace(selectedPlace === place ? null : place);
+  const updateDay = (dayIndex, nextDay) => {
+    setLocalStructured((prev) => {
+      const nextDays = [...(prev?.days || [])];
+      nextDays[dayIndex] = nextDay;
+      return { ...(prev || {}), days: nextDays };
+    });
   };
 
-  // Parse budget breakdown if present
-  const budgetSection = text.match(/\*\*Budget Breakdown:\*\*([\s\S]*?)$/);
-  const budgetItems = budgetSection ? budgetSection[1].split('\n').filter(line => line.trim().startsWith('*')).map(line => line.trim().substring(1).trim()) : [];
+  const persistStructured = async (nextStructured) => {
+    if (typeof onStructuredChange === 'function') {
+      await onStructuredChange(nextStructured);
+    }
+  };
 
   return (
-    <div className={`space-y-6 ${className}`}>
+    <div className={`space-y-4 ${className}`}>
       {days.map((day, index) => (
-        <DayCard
-          key={index}
+        <EditableDayCard
+          key={`${day.dayNumber}-${index}`}
           day={day}
+          dayIndex={index}
           isExpanded={expandedDays.has(index)}
           onToggle={() => toggleDay(index)}
-          onPlaceClick={handlePlaceClick}
-          selectedPlace={selectedPlace}
+          onDayChange={updateDay}
+          onPersist={persistStructured}
+          structured={localStructured}
         />
       ))}
+    </div>
+  );
+}
 
-      {budgetItems.length > 0 && (
-        <div className="bg-slate-800/60 border border-slate-600 rounded-xl p-6">
-          <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-3">
-            <div className="w-10 h-10 bg-green-500/20 rounded-full flex items-center justify-center">
-              <span className="text-green-400 font-bold text-lg">₹</span>
+function EditableDayCard({
+  day,
+  dayIndex,
+  isExpanded,
+  onToggle,
+  onDayChange,
+  onPersist,
+  structured,
+}) {
+  const [isEditingDay, setIsEditingDay] = useState(false);
+  const [editingCheckpointIndex, setEditingCheckpointIndex] = useState(-1);
+  const [draftDay, setDraftDay] = useState(day);
+
+  useEffect(() => {
+    setDraftDay(day);
+  }, [day]);
+
+  const handleSaveDay = async () => {
+    onDayChange(dayIndex, draftDay);
+    setIsEditingDay(false);
+
+    const nextDays = [...(structured?.days || [])];
+    nextDays[dayIndex] = draftDay;
+    await onPersist({ ...(structured || {}), days: nextDays });
+  };
+
+  const handleCancelDay = () => {
+    setDraftDay(day);
+    setIsEditingDay(false);
+  };
+
+  const saveCheckpoint = async () => {
+    onDayChange(dayIndex, draftDay);
+    setEditingCheckpointIndex(-1);
+
+    const nextDays = [...(structured?.days || [])];
+    nextDays[dayIndex] = draftDay;
+    await onPersist({ ...(structured || {}), days: nextDays });
+  };
+
+  return (
+    <article className="rounded-xl border border-slate-600 bg-slate-800/60 overflow-hidden">
+      <div className="flex items-center justify-between p-4 md:p-5 border-b border-slate-700/60">
+        <button type="button" onClick={onToggle} className="flex items-center gap-3 text-left">
+          {isExpanded ? (
+            <ChevronDown className="w-5 h-5 text-slate-300" />
+          ) : (
+            <ChevronRight className="w-5 h-5 text-slate-300" />
+          )}
+          <div>
+            <p className="text-xs uppercase text-teal-300 tracking-wide">Day {draftDay.dayNumber}</p>
+            <h3 className="text-lg font-semibold text-white">{draftDay.title || `Day ${draftDay.dayNumber}`}</h3>
+            {draftDay.date ? <p className="text-xs text-slate-400 mt-1">{draftDay.date}</p> : null}
+          </div>
+        </button>
+
+        {!isEditingDay ? (
+          <button
+            type="button"
+            onClick={() => setIsEditingDay(true)}
+            className="inline-flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-200 hover:bg-amber-500/20 transition"
+          >
+            <Edit3 className="w-3.5 h-3.5" />
+            Edit Day
+          </button>
+        ) : (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleSaveDay}
+              className="inline-flex items-center gap-1 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-200 hover:bg-emerald-500/20 transition"
+            >
+              <Save className="w-3.5 h-3.5" />
+              Save
+            </button>
+            <button
+              type="button"
+              onClick={handleCancelDay}
+              className="inline-flex items-center gap-1 rounded-lg border border-slate-500 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-700 transition"
+            >
+              <X className="w-3.5 h-3.5" />
+              Cancel
+            </button>
+          </div>
+        )}
+      </div>
+
+      {isExpanded ? (
+        <div className="p-4 md:p-5 space-y-4">
+          {isEditingDay ? (
+            <div className="grid gap-3 md:grid-cols-2">
+              <input
+                type="text"
+                value={draftDay.title || ''}
+                onChange={(event) => setDraftDay((prev) => ({ ...prev, title: event.target.value }))}
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-white"
+                placeholder="Day title"
+              />
+              <input
+                type="date"
+                value={draftDay.date || ''}
+                onChange={(event) => setDraftDay((prev) => ({ ...prev, date: event.target.value }))}
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-white"
+              />
+              <textarea
+                rows={2}
+                value={draftDay.summary || ''}
+                onChange={(event) => setDraftDay((prev) => ({ ...prev, summary: event.target.value }))}
+                className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-white md:col-span-2"
+                placeholder="Day summary"
+              />
             </div>
-            Budget Breakdown
-          </h3>
-          <div className="grid gap-3 md:grid-cols-2">
-            {budgetItems.map((item, index) => {
-              const [category, amount] = item.split(': ');
+          ) : draftDay.summary ? (
+            <p className="text-sm text-slate-300">{draftDay.summary}</p>
+          ) : null}
+
+          <div className="space-y-3">
+            {(draftDay.checkpoints || []).map((checkpoint, checkpointIndex) => {
+              const isEditingCheckpoint = editingCheckpointIndex === checkpointIndex;
+
               return (
-                <div key={index} className="flex justify-between items-center p-3 bg-slate-700/30 rounded-lg border border-slate-600/30">
-                  <span className="text-slate-300 text-sm">{category}</span>
-                  <span className="text-green-400 font-semibold">{amount}</span>
+                <div key={`${checkpoint.title}-${checkpointIndex}`} className="rounded-lg border border-slate-700 bg-slate-900/50 p-3">
+                  {!isEditingCheckpoint ? (
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs text-teal-300 font-semibold">{checkpoint.time || '-'}</p>
+                        <h4 className="text-sm font-semibold text-white mt-1">{checkpoint.title}</h4>
+                        <p className="text-xs text-slate-300 mt-1">{checkpoint.description}</p>
+                        {checkpoint.location ? (
+                          <p className="text-xs text-slate-400 mt-1 inline-flex items-center gap-1">
+                            <MapPin className="w-3 h-3" />
+                            {checkpoint.location}
+                          </p>
+                        ) : null}
+                        {checkpoint.notes ? <p className="text-xs text-slate-400 mt-1">{checkpoint.notes}</p> : null}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setEditingCheckpointIndex(checkpointIndex)}
+                        className="inline-flex items-center gap-1 rounded-lg border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-[11px] text-amber-200 hover:bg-amber-500/20 transition"
+                      >
+                        <Edit3 className="w-3 h-3" />
+                        Edit
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="grid gap-2 md:grid-cols-2">
+                        <input
+                          type="text"
+                          value={checkpoint.time || ''}
+                          onChange={(event) => {
+                            const nextCheckpoints = [...(draftDay.checkpoints || [])];
+                            nextCheckpoints[checkpointIndex] = {
+                              ...nextCheckpoints[checkpointIndex],
+                              time: event.target.value,
+                            };
+                            setDraftDay((prev) => ({ ...prev, checkpoints: nextCheckpoints }));
+                          }}
+                          className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-white text-xs"
+                          placeholder="Time"
+                        />
+                        <input
+                          type="text"
+                          value={checkpoint.location || ''}
+                          onChange={(event) => {
+                            const nextCheckpoints = [...(draftDay.checkpoints || [])];
+                            nextCheckpoints[checkpointIndex] = {
+                              ...nextCheckpoints[checkpointIndex],
+                              location: event.target.value,
+                            };
+                            setDraftDay((prev) => ({ ...prev, checkpoints: nextCheckpoints }));
+                          }}
+                          className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-white text-xs"
+                          placeholder="Location"
+                        />
+                      </div>
+                      <input
+                        type="text"
+                        value={checkpoint.title || ''}
+                        onChange={(event) => {
+                          const nextCheckpoints = [...(draftDay.checkpoints || [])];
+                          nextCheckpoints[checkpointIndex] = {
+                            ...nextCheckpoints[checkpointIndex],
+                            title: event.target.value,
+                          };
+                          setDraftDay((prev) => ({ ...prev, checkpoints: nextCheckpoints }));
+                        }}
+                        className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-white text-xs"
+                        placeholder="Checkpoint title"
+                      />
+                      <textarea
+                        rows={2}
+                        value={checkpoint.description || ''}
+                        onChange={(event) => {
+                          const nextCheckpoints = [...(draftDay.checkpoints || [])];
+                          nextCheckpoints[checkpointIndex] = {
+                            ...nextCheckpoints[checkpointIndex],
+                            description: event.target.value,
+                          };
+                          setDraftDay((prev) => ({ ...prev, checkpoints: nextCheckpoints }));
+                        }}
+                        className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-white text-xs"
+                        placeholder="Description"
+                      />
+                      <textarea
+                        rows={2}
+                        value={checkpoint.notes || ''}
+                        onChange={(event) => {
+                          const nextCheckpoints = [...(draftDay.checkpoints || [])];
+                          nextCheckpoints[checkpointIndex] = {
+                            ...nextCheckpoints[checkpointIndex],
+                            notes: event.target.value,
+                          };
+                          setDraftDay((prev) => ({ ...prev, checkpoints: nextCheckpoints }));
+                        }}
+                        className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-white text-xs"
+                        placeholder="Notes"
+                      />
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={saveCheckpoint}
+                          className="inline-flex items-center gap-1 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-[11px] text-emerald-200 hover:bg-emerald-500/20 transition"
+                        >
+                          <Save className="w-3 h-3" />
+                          Save Checkpoint
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDraftDay(day);
+                            setEditingCheckpointIndex(-1);
+                          }}
+                          className="inline-flex items-center gap-1 rounded-lg border border-slate-500 px-3 py-1.5 text-[11px] text-slate-200 hover:bg-slate-700 transition"
+                        >
+                          <X className="w-3 h-3" />
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}
           </div>
         </div>
-      )}
-
-      {selectedPlace && (
-        <PlaceInfoCard
-          place={selectedPlace}
-          onClose={() => setSelectedPlace(null)}
-        />
-      )}
-    </div>
+      ) : null}
+    </article>
   );
-}
-
-function DayCard({ day, isExpanded, onToggle, onPlaceClick, selectedPlace }) {
-  const allPlaces = extractPlaces(`${day.day} ${day.activities.join(' ')} ${day.description}`);
-
-  const renderHighlightedText = (text, places) => {
-    if (!places.length) return text;
-
-    let result = text;
-    places.forEach(place => {
-      const regex = new RegExp(`\\b${place}\\b`, 'gi');
-      result = result.replace(regex, `<span class="place-highlight" data-place="${place}">${place}</span>`);
-    });
-    return result;
-  };
-
-  const handleTextClick = (e) => {
-    const placeElement = e.target.closest('.place-highlight');
-    if (placeElement) {
-      const place = placeElement.getAttribute('data-place');
-      onPlaceClick(place);
-    }
-  };
-
-  // Parse activities for tabular display
-  const parseActivity = (activity) => {
-    const timeMatch = activity.match(/^(\d{1,2}:\d{2}\s*(?:AM|PM)?):\s*(.+?)\s*-\s*(.+)$/);
-    if (timeMatch) {
-      return {
-        time: timeMatch[1],
-        activity: timeMatch[2],
-        description: timeMatch[3]
-      };
-    }
-    return {
-      time: '',
-      activity: activity,
-      description: ''
-    };
-  };
-
-  const parsedActivities = day.activities.map(parseActivity);
-
-  // Clean day title by removing markdown bold syntax
-  const cleanDayTitle = day.day.replace(/\*\*/g, '');
-
-  return (
-    <div className="bg-slate-800/60 border border-slate-600 rounded-xl overflow-hidden transition-all duration-300 hover:border-slate-500 hover:shadow-lg">
-      <button
-        onClick={onToggle}
-        className="w-full flex items-center justify-between p-6 text-left hover:bg-slate-700/30 transition-colors group"
-      >
-        <div className="flex items-center gap-4">
-          <div className="w-10 h-10 bg-teal-500/20 rounded-full flex items-center justify-center">
-            <Calendar className="w-5 h-5 text-teal-400" />
-          </div>
-          <div>
-            <h3 className="text-xl font-bold text-white group-hover:text-teal-100 transition-colors">
-              <span
-                dangerouslySetInnerHTML={{ __html: renderHighlightedText(cleanDayTitle, allPlaces) }}
-                onClick={handleTextClick}
-              />
-            </h3>
-            <p className="text-slate-400 text-sm mt-1">
-              {parsedActivities.length} activities planned
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="text-right">
-            <div className="text-sm text-slate-400">
-              {parsedActivities.length > 0 ? `${parsedActivities[0].time} - ${parsedActivities[parsedActivities.length - 1].time || 'End'}` : ''}
-            </div>
-          </div>
-          {isExpanded ? (
-            <ChevronDown className="w-6 h-6 text-slate-400 group-hover:text-teal-400 transition-colors" />
-          ) : (
-            <ChevronRight className="w-6 h-6 text-slate-400 group-hover:text-teal-400 transition-colors" />
-          )}
-        </div>
-      </button>
-
-      {isExpanded && (
-        <div className="px-6 pb-6 border-t border-slate-700/50">
-          <div className="mt-6">
-            <div className="overflow-x-auto rounded-lg border border-slate-600/50 shadow-lg">
-              <table className="itinerary-table">
-                <thead>
-                  <tr>
-                    <th className="text-left py-4 px-6">
-                      <div className="flex items-center gap-2">
-                        <Clock className="w-4 h-4" />
-                        Time
-                      </div>
-                    </th>
-                    <th className="text-left py-4 px-6">
-                      <div className="flex items-center gap-2">
-                        <MapPin className="w-4 h-4" />
-                        Activity
-                      </div>
-                    </th>
-                    <th className="text-left py-4 px-6">Description</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {parsedActivities.map((item, idx) => (
-                    <tr key={idx} className="border-b border-slate-700/30 last:border-b-0">
-                      <td className="py-5 px-6 text-teal-300 font-bold text-sm align-top min-w-[120px]">
-                        <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 bg-teal-400 rounded-full flex-shrink-0"></div>
-                          {item.time}
-                        </div>
-                      </td>
-                      <td className="py-5 px-6 text-slate-200 font-medium align-top">
-                        <span
-                          dangerouslySetInnerHTML={{ __html: renderHighlightedText(item.activity.replace(/\*\*/g, ''), allPlaces) }}
-                          onClick={handleTextClick}
-                          className="cursor-pointer hover:text-teal-200 transition-colors"
-                        />
-                      </td>
-                      <td className="py-5 px-6 text-slate-200 text-sm align-top leading-relaxed">
-                        <span
-                          dangerouslySetInnerHTML={{ __html: renderHighlightedText(item.description, allPlaces) }}
-                          onClick={handleTextClick}
-                          className="cursor-pointer hover:text-slate-100 transition-colors"
-                        />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {day.description && (
-            <div className="mt-6 p-4 bg-slate-700/30 rounded-lg border border-slate-600/30">
-              <h4 className="text-sm font-medium text-slate-300 mb-2 flex items-center gap-2">
-                <Info className="w-4 h-4" />
-                Additional Notes
-              </h4>
-              <p
-                className="text-slate-200 text-sm leading-relaxed"
-                dangerouslySetInnerHTML={{ __html: renderHighlightedText(day.description, allPlaces) }}
-                onClick={handleTextClick}
-              />
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function PlaceInfoCard({ place, onClose }) {
-  // Mock place information - in a real app, this would come from an API
-  const placeInfo = {
-    description: `${place} is a beautiful destination known for its scenic beauty and cultural significance.`,
-    bestTime: "October to June",
-    activities: ["Sightseeing", "Photography", "Local cuisine"],
-    tips: ["Carry water", "Wear comfortable shoes", "Respect local customs"]
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-      <div className="bg-slate-800 border border-slate-600 rounded-xl p-6 max-w-md w-full shadow-2xl">
-        <div className="flex items-start justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <MapPin className="w-5 h-5 text-teal-400" />
-            <h3 className="text-lg font-semibold text-white">{place}</h3>
-          </div>
-          <button
-            onClick={onClose}
-            className="text-slate-400 hover:text-white transition"
-          >
-            ✕
-          </button>
-        </div>
-
-        <div className="space-y-3 text-sm">
-          <p className="text-slate-200">{placeInfo.description}</p>
-
-          <div>
-            <span className="text-slate-400">Best time to visit:</span>
-            <span className="text-slate-200 ml-2">{placeInfo.bestTime}</span>
-          </div>
-
-          <div>
-            <span className="text-slate-400 block mb-1">Popular activities:</span>
-            <div className="flex flex-wrap gap-1">
-              {placeInfo.activities.map((activity, idx) => (
-                <span key={idx} className="px-2 py-1 bg-teal-500/20 text-teal-300 rounded text-xs">
-                  {activity}
-                </span>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <span className="text-slate-400 block mb-1">Travel tips:</span>
-            <ul className="text-slate-200 space-y-1">
-              {placeInfo.tips.map((tip, idx) => (
-                <li key={idx} className="flex items-start gap-2">
-                  <span className="text-teal-400 mt-1">•</span>
-                  {tip}
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Import the parser function
-function parseItineraryText(text) {
-  if (!text || typeof text !== 'string') {
-    return [];
-  }
-
-  const days = [];
-  const lines = text.split('\n').map(line => line.trim()).filter(line => line);
-
-  let currentDay = null;
-  let currentActivities = [];
-  let currentDescription = '';
-
-  for (const line of lines) {
-    // Check if line starts with "Day X:" (case insensitive)
-    const dayMatch = line.match(/^Day\s+(\d+):?\s*(.*)$/i);
-    if (dayMatch) {
-      // Save previous day if exists
-      if (currentDay) {
-        days.push({
-          day: currentDay,
-          activities: currentActivities,
-          description: currentDescription.trim()
-        });
-      }
-
-      // Start new day
-      currentDay = line;
-      currentActivities = [];
-      currentDescription = '';
-    } else if (line.startsWith('-')) {
-      // This is an activity
-      const activity = line.substring(1).trim();
-      if (activity) {
-        currentActivities.push(activity);
-      }
-    } else if (currentDay && line) {
-      // This is description text
-      currentDescription += (currentDescription ? ' ' : '') + line;
-    }
-  }
-
-  // Don't forget the last day
-  if (currentDay) {
-    days.push({
-      day: currentDay,
-      activities: currentActivities,
-      description: currentDescription.trim()
-    });
-  }
-
-  return days;
 }

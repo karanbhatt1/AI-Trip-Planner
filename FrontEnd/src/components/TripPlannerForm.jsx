@@ -6,6 +6,11 @@ import ConfirmDialog from './ConfirmDialog';
 import Toast from './Toast';
 import ItineraryDisplay from './ItineraryDisplay';
 import RouteVisualizerSection from './RouteVisualizerSection';
+import {
+  flattenCheckpoints,
+  normalizeStructuredItinerary,
+  structuredToMarkdown,
+} from '../utils/itineraryParser';
 
 export default function TripPlannerForm() {
   const { isAuthenticated, isInitializing, token, user } = useAuth();
@@ -19,6 +24,7 @@ export default function TripPlannerForm() {
   const [customDestination, setCustomDestination] = useState('');
   const [specialRequirements, setSpecialRequirements] = useState('');
   const [startingPosition, setStartingPosition] = useState('');
+  const [startingCoordinates, setStartingCoordinates] = useState('');
   const [isLocating, setIsLocating] = useState(false);
   const [formError, setFormError] = useState('');
   const [formSuccess, setFormSuccess] = useState('');
@@ -39,6 +45,7 @@ export default function TripPlannerForm() {
   const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, tripId: null });
   const [toast, setToast] = useState({ isOpen: false, type: 'info', title: '', message: '' });
   const [editableSavedItinerary, setEditableSavedItinerary] = useState('');
+  const [editableStructuredItinerary, setEditableStructuredItinerary] = useState(null);
   const [editTripForm, setEditTripForm] = useState({
     startDate: '',
     endDate: '',
@@ -86,6 +93,24 @@ export default function TripPlannerForm() {
     return formatDateInput(start);
   };
 
+  const reverseGeocodeLocation = async (latitude, longitude) => {
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${latitude}&lon=${longitude}`,
+      {
+        headers: {
+          Accept: 'application/json',
+        },
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error('Failed to reverse geocode location');
+    }
+
+    const data = await response.json();
+    return data?.display_name || `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+  };
+
   const getCurrentLocation = async () => {
     setIsLocating(true);
     setFormError('');
@@ -97,11 +122,22 @@ export default function TripPlannerForm() {
     }
     
     navigator.geolocation.getCurrentPosition(
-      (position) => {
+      async (position) => {
         const { latitude, longitude } = position.coords;
-        setStartingPosition(`${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
-        setFormSuccess(`Location detected: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
-        setIsLocating(false);
+        const coordinates = `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+
+        try {
+          const address = await reverseGeocodeLocation(latitude, longitude);
+          setStartingPosition(address);
+          setStartingCoordinates(coordinates);
+          setFormSuccess(`Location detected: ${address}`);
+        } catch {
+          setStartingPosition(coordinates);
+          setStartingCoordinates(coordinates);
+          setFormSuccess(`Location detected: ${coordinates}`);
+        } finally {
+          setIsLocating(false);
+        }
       },
       (error) => {
         let errorMsg = 'Unable to get your location.';
@@ -181,6 +217,54 @@ export default function TripPlannerForm() {
       }));
     }
     setSelectedTripDetails(updatedTrip);
+  };
+
+  const getTripUpdatePayload = (trip, overrides = {}) => ({
+    startDate: trip.startDate ? formatDateInput(new Date(trip.startDate)) : '',
+    endDate: trip.endDate ? formatDateInput(new Date(trip.endDate)) : '',
+    travelers: String(trip.travelers ?? 1),
+    budget: trip.budget || '',
+    interests: Array.isArray(trip.interests) ? trip.interests : [],
+    destinations: Array.isArray(trip.destinations) ? trip.destinations : [],
+    specialRequirements: trip.specialRequirements || '',
+    ...overrides,
+  });
+
+  const saveStructuredItinerary = async (updatedStructured) => {
+    if (!savedTrip?._id) {
+      return;
+    }
+
+    const normalized = normalizeStructuredItinerary(updatedStructured, editableSavedItinerary);
+    const markdown = structuredToMarkdown(normalized);
+    const checkpoints = flattenCheckpoints(normalized);
+
+    setEditableStructuredItinerary(normalized);
+    setEditableSavedItinerary(markdown);
+
+    try {
+      const response = await apiRequest(`/api/v1/trip/${savedTrip._id}`, {
+        method: 'PUT',
+        token,
+        body: getTripUpdatePayload(savedTrip, {
+          itinerary: markdown,
+          itineraryStructured: normalized,
+          checkpoints,
+        }),
+      });
+
+      if (response?.trip) {
+        updateTripInState(response.trip);
+      }
+
+      setFormSuccess('Itinerary changes saved.');
+    } catch (error) {
+      if (error instanceof ApiError) {
+        setTripActionError(error.message);
+      } else {
+        setTripActionError('Failed to save itinerary changes.');
+      }
+    }
   };
 
   const saveTripEdits = async () => {
@@ -358,6 +442,7 @@ export default function TripPlannerForm() {
 
     const saveTrip = async () => {
       setIsSubmitting(true);
+      setIsGeneratingItinerary(true);
 
       try {
         const response = await apiRequest('/api/v1/trip/create', {
@@ -370,47 +455,34 @@ export default function TripPlannerForm() {
             budget: budgetRange === 'custom' ? customBudget.trim() : budgetRange,
             interests: selectedInterests,
             destinations: normalizedDestinations,
+            currentDestination: normalizedDestinations[0] || customDestination.trim() || '',
             specialRequirements,
             startingPosition,
+            startingCoordinates,
+            currentLocation: startingPosition,
           },
         });
 
-        setFormSuccess(response?.message || 'Trip preferences saved. Generating itinerary...');
+        setFormSuccess(response?.message || 'Trip and itinerary created successfully.');
         setLatestBackendResponse(response);
         setResponseView('summary');
-        
+
         if (response?.trip) {
-          const tripWithItinerary = { ...response.trip };
-          setIsGeneratingItinerary(true);
-          
-          try {
-            // Generate itinerary from chatbot
-            const numDays = Math.ceil((new Date(response.trip.endDate) - new Date(response.trip.startDate)) / (1000 * 60 * 60 * 24));
-            
-            const itineraryResponse = await apiRequest('/api/v1/chatbot/chat', {
-              method: 'POST',
-              token,
-              body: {
-                start_date: response.trip.startDate,
-                end_date: response.trip.endDate,
-                places_to_visit: response.trip.destinations,
-                budget: response.trip.budget,
-                num_travelers: response.trip.travelers,
-                num_days: numDays,
-              },
-            });
-            
-            tripWithItinerary.itinerary = itineraryResponse?.itinerary || '';
-            setEditableSavedItinerary(itineraryResponse?.itinerary || '');
-            setFormSuccess('Itinerary generated successfully!');
-          } catch (itineraryError) {
-            console.error('Error generating itinerary:', itineraryError);
-            tripWithItinerary.itinerary = 'Itinerary generation pending...';
-            setEditableSavedItinerary('');
-          } finally {
-            setIsGeneratingItinerary(false);
-          }
-          
+          const tripWithItinerary = {
+            ...response.trip,
+            itinerary: response.trip.itinerary || response.itinerary || '',
+            itineraryStructured:
+              response.trip.itineraryStructured || response.itineraryStructured || null,
+          };
+
+          setEditableSavedItinerary(tripWithItinerary.itinerary || '');
+          setEditableStructuredItinerary(
+            normalizeStructuredItinerary(
+              tripWithItinerary.itineraryStructured,
+              tripWithItinerary.itinerary || ''
+            )
+          );
+
           setSavedTrip(tripWithItinerary);
           setLatestBackendResponse((prev) => ({ ...prev, trip: tripWithItinerary }));
           setIsItineraryGenerated(true);
@@ -426,6 +498,7 @@ export default function TripPlannerForm() {
           setFormError('Failed to save trip preferences.');
         }
       } finally {
+        setIsGeneratingItinerary(false);
         setIsSubmitting(false);
       }
     };
@@ -464,9 +537,16 @@ export default function TripPlannerForm() {
   }, [isAuthenticated, token, user?.firebaseUid]);
 
   useEffect(() => {
-    if (savedTrip?.itinerary) {
-      setEditableSavedItinerary(savedTrip.itinerary);
+    if (!savedTrip) {
+      setEditableSavedItinerary('');
+      setEditableStructuredItinerary(null);
+      return;
     }
+
+    setEditableSavedItinerary(savedTrip.itinerary || '');
+    setEditableStructuredItinerary(
+      normalizeStructuredItinerary(savedTrip.itineraryStructured, savedTrip.itinerary || '')
+    );
   }, [savedTrip]);
 
   const interests = ["Adventure Sports", "Spiritual", "Nature & Wildlife", "Photography", "Trekking", "Pilgrimage", "Yoga & Wellness", "Local Culture"];
@@ -563,7 +643,7 @@ export default function TripPlannerForm() {
                       onClick={() => {
                         setEditingTripId('');
                         setSelectedTripDetails(trip);
-                        setSelectedTripView('structured');
+                        setSelectedTripView('details');
                       }}
                       className="mt-3 w-full rounded-lg border border-teal-500/50 bg-teal-500/10 px-3 py-2 text-sm text-teal-200 hover:bg-teal-500/20 transition cursor-pointer"
                     >
@@ -717,7 +797,7 @@ export default function TripPlannerForm() {
                 type="text"
                 value={startingPosition}
                 onChange={(event) => setStartingPosition(event.target.value)}
-                placeholder="Enter your starting location (e.g., latitude, longitude or city name)"
+                placeholder="Enter your starting location or use auto-detect"
                 className="flex-1 px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:border-teal-500 outline-none transition"
               />
               <button
@@ -730,6 +810,11 @@ export default function TripPlannerForm() {
                 {isLocating ? 'Locating...' : 'Auto-detect'}
               </button>
             </div>
+            {startingCoordinates ? (
+              <p className="mt-2 text-xs text-slate-400">
+                Coordinates: {startingCoordinates}
+              </p>
+            ) : null}
           </div>
 
           <div className="mb-10">
@@ -910,7 +995,11 @@ export default function TripPlannerForm() {
                     </button>
                   </div>
                   {itineraryViewMode === 'structured' ? (
-                    <ItineraryDisplay itineraryText={editableSavedItinerary} />
+                    <ItineraryDisplay
+                      itineraryText={editableSavedItinerary}
+                      itineraryStructured={editableStructuredItinerary}
+                      onStructuredChange={saveStructuredItinerary}
+                    />
                   ) : (
                     <textarea
                       value={editableSavedItinerary}
@@ -1139,23 +1228,11 @@ export default function TripPlannerForm() {
                 <div className="rounded-xl border border-slate-700 bg-slate-950/60 p-4">
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-slate-500 text-sm">Itinerary</p>
-                    {selectedTripDetails.itinerary && (
-                      <button
-                        type="button"
-                        onClick={() => setSelectedTripView(selectedTripView === 'structured' ? 'raw' : 'structured')}
-                        className="text-xs text-teal-400 hover:text-teal-300 transition"
-                      >
-                        {selectedTripView === 'structured' ? 'View Raw' : 'View Structured'}
-                      </button>
-                    )}
                   </div>
-                  {selectedTripView === 'structured' && selectedTripDetails.itinerary ? (
-                    <ItineraryDisplay itineraryText={selectedTripDetails.itinerary} />
-                  ) : (
-                    <p className="text-slate-200 text-sm leading-7 whitespace-pre-wrap">
-                      {selectedTripDetails.itinerary || 'Detailed itinerary is not available yet.'}
-                    </p>
-                  )}
+                  <ItineraryDisplay
+                    itineraryText={selectedTripDetails.itinerary}
+                    itineraryStructured={selectedTripDetails.itineraryStructured}
+                  />
                 </div>
               </div>
             ) : null}

@@ -5,7 +5,8 @@ const RouteSidebar = ({
   routeSummary,
   selectedCheckpoint,
   onCheckpointClick,
-  isLoading
+  isLoading,
+  startingLocation,
 }) => {
   if (isLoading) {
     return (
@@ -60,6 +61,13 @@ const RouteSidebar = ({
             </div>
           </div>
         )}
+
+        {startingLocation ? (
+          <div className="mt-3 rounded-lg border border-teal-500/30 bg-teal-500/10 p-3">
+            <p className="text-xs text-teal-200">Route starts from</p>
+            <p className="text-sm text-white font-medium mt-1 truncate">{startingLocation.name || 'Current Location'}</p>
+          </div>
+        ) : null}
       </div>
 
       {/* Checkpoints List */}
