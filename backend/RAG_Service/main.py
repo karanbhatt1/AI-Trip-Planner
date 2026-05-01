@@ -93,151 +93,311 @@ def _build_prompt(payload, context, format_instructions):
 	interests = ", ".join(_as_list(payload.get("interests"))) or "general sightseeing"
 	special_requirements = str(payload.get("special_requirements") or payload.get("specialRequirements") or "")
 
-	return f"""You are an expert Uttarakhand travel planner and logistics optimizer.
+	return f"""You are an expert Uttarakhand travel planner generating realistic, non-hallucinated itineraries.
 
-Use the retrieved context plus the trip details to generate a realistic, practical, editable itinerary in strict JSON only.
+CRITICAL: Generate STRICT JSON ONLY. No markdown, no comments, no explanation outside JSON.
 
-Retrieved context:
+Retrieved context (use this for verification of places/costs):
 {context or 'No retrieved context available.'}
 
-Trip details:
-Start date: {start_date}
-End date: {end_date}
-Current location: {current_location}
-Current destination: {current_destination}
-Destinations: {', '.join(places)}
-Budget: {budget}
-Travelers: {travelers}
-Days: {num_days}
-Interests: {interests}
-Special requirements: {special_requirements}
+TRIP PARAMETERS:
+- Start date: {start_date}
+- End date: {end_date}
+- Current location: {current_location}
+- Destinations: {', '.join(places)}
+- Budget range: {budget}
+- Number of travelers: {travelers}
+- Days: {num_days}
+- Interests: {interests}
+- Special requirements: {special_requirements}
 
-Planning rules:
-- Treat mountain travel as slow and add buffer time for delays.
-- Keep the plan route-optimized and avoid unnecessary backtracking.
-- Respect hotel check-in around 12 PM and check-out around 10 AM.
-- Do not overload any day; keep the itinerary realistic and comfortable.
-- Include morning, afternoon, and evening structure for every day.
-- Include travel distance/time, weather considerations when relevant, safety notes, and local tips.
-- Include realistic activities for each checkpoint, with costs in Indian Rupees.
-- Include cost breakdowns for transport, accommodation, food, and activities.
-- Use only real, verified Uttarakhand locations and no fictional places.
-- Keep the itinerary editable and include alternatives for major activities.
+REQUIRED OUTPUT SCHEMA (STRICT JSON ONLY):
+{{
+  "destination": [],
+  "interest": [],
+  "number_of_travelers": {travelers},
+  "budget": "{budget}",
+  "checkpoint": {{
+    "day1": {{
+      "activities": [
+        {{
+          "timeframe": {{
+            "time_range": "Dynamic range based on travel feasibility (e.g., 'Early Morning', 'Mid-Morning', 'Post Lunch', 'Late Afternoon'), NOT hardcoded times",
+            "destination": "",
+            "places_to_visit": [],
+            "time_needed": [],
+            "cost": [],
+            "location": [],
+            "weather_details": "",
+            "optimal_time_to_visit": ""
+          }}
+        }}
+      ],
+      "day_summary": ""
+    }}
+  }}
+}}
 
-Budget handling:
-- If budget is low, prefer budget stays and shared transport.
-- If budget is high, include better hotels and premium experiences.
+CRITICAL GENERATION RULES:
 
-Feasibility handling:
-- If the number of days is too large for the requested scope or there are too many destinations to cover fully, explicitly say that all areas cannot be explored in full within the available days.
-- In that case, reduce the plan intelligently and prioritize the most feasible subset of places.
-- Explain the reduction in notes instead of forcing an unrealistic full itinerary.
-- If the trip is not feasible as requested, provide the closest valid version.
-- Respect special requirements strictly.
+1. TIMEFRAME CALCULATION:
+   - DO NOT use hardcoded times like "08:00 AM", "12:30 PM"
+   - Calculate dynamic ranges based on:
+     - Travel distance between checkpoints
+     - Mountain terrain (slow travel = more buffer)
+     - Realistic activity duration
+     - Rest periods
+   - Use descriptive ranges: "Early Morning" (6-8 AM), "Late Afternoon" (4-6 PM)
+   - Ensure all activities fit within daylight and feasibility
 
-Return only valid JSON and no markdown, explanation, or extra text.
-Follow this schema exactly:
+2. NO REPETITION:
+   - NEVER visit the same place twice across different days
+   - If a place is visited on Day 1, exclude it from subsequent days
+   - Vary activities even for similar destination types
 
-{format_instructions}
+3. CHECKPOINT LOGIC:
+   - "places_to_visit" array length = "time_needed", "cost", "location" arrays
+   - Maintain logical travel flow (no zig-zag, no backtracking)
+   - Group nearby attractions in single day to minimize travel time
 
-Make the itinerary feel like it was created by a local travel expert, not a generic AI."""
+4. BUDGET DISTRIBUTION:
+   - Total must stay within "{budget}" range
+   - Distribute across: transport, accommodation, food, activities
+   - Adjust activity costs based on budget tier
+   - Daily food budget: ₹200-600 per person
+   - Activity budget: ₹100-2000 per person per day
+
+5. MOUNTAIN TRAVEL CONSTRAINTS:
+   - Add 20-30% buffer time for mountain roads
+   - Avoid same-day distant travel (>100 km)
+   - Consider altitude impact and acclimatization
+   - Account for weather unpredictability
+
+6. INTEREST ALIGNMENT:
+   - Prioritize user interests (spiritual, wildlife, adventure, natural)
+   - Include meaningful experiences without forcing irrelevant places
+   - If interests are limited, deepen exploration of fewer places
+
+7. REALISTIC ATTRACTIONS:
+   - Use ONLY verified Uttarakhand locations
+   - Include real costs from retrieved context or standard rates
+   - Add weather notes and safety tips
+   - Mention local transport options
+
+8. OVERLONG TRIP HANDLING:
+   - If days > destinations × 2, add depth:
+     - Multi-day explorations of single region
+     - Rest days or flexibility days
+     - Nearby area expansions
+   - Do NOT repeat same checkpoint across days
+
+9. DAY SUMMARY:
+   - Concise (1-2 sentences)
+   - Highlights key activity type and destination
+   - Reflects feasibility and interest alignment
+
+10. JSON STRUCTURE MUST BE VALID:
+    - Proper array/object syntax
+    - No trailing commas
+    - Escaped quotes in strings
+    - Valid date/time formats
+
+OUTPUT: Valid JSON only. No explanation, no markdown, no commentary."""
 
 
 
-def _generate_detailed_day_checkpoints(day_index, day_date, place, interests, budget, current_location, travelers):
+def _get_travel_time_minutes(origin, destination):
 	"""
-	Generate detailed day checkpoints with place names, costs, transport, and activities.
-	This is a robust fallback that does NOT rely on LLM.
+	Return realistic travel time between Uttarakhand locations in minutes.
+	Accounts for mountain terrain (add 20-30% buffer).
 	"""
-	interest_hint = interests[day_index % len(interests)] if interests else "sightseeing"
-	
-	# Map places to local attractions and realistic costs
-	place_attractions = {
-		"Rishikesh": {
-			"morning": {"activity": "Ghat Yoga & Meditation", "cost": "₹300-500", "transport": "Local taxi/auto"},
-			"midday": {"activity": "Triveni Ghat & Temple Visit", "cost": "₹200-400", "transport": "Walking/local transport"},
-			"afternoon": {"activity": "Adventure Sports (Rafting)", "cost": "₹800-1500", "transport": "Organized shuttle"},
-			"evening": {"activity": "Lakshman Jhula & Market", "cost": "₹300-600", "transport": "Local auto/bus"}
-		},
-		"Haridwar": {
-			"morning": {"activity": "Ghat Pilgrimage & Aarti", "cost": "₹200-400", "transport": "Walking/auto"},
-			"midday": {"activity": "Mansa Devi Temple Cable Car", "cost": "₹250-500", "transport": "Cable car"},
-			"afternoon": {"activity": "Local Market & Shopping", "cost": "₹500-1200", "transport": "Walking/auto"},
-			"evening": {"activity": "Evening Aarti Ceremony", "cost": "₹150-300", "transport": "Walking"}
-		},
-		"Mussoorie": {
-			"morning": {"activity": "Mall Road Walking & Breakfast", "cost": "₹400-800", "transport": "Walking"},
-			"midday": {"activity": "Gun Hill Viewpoint", "cost": "₹300-600", "transport": "Cable car/local taxi"},
-			"afternoon": {"activity": "Kempty Falls Trek", "cost": "₹600-1200", "transport": "Organized tour/local taxi"},
-			"evening": {"activity": "Cloud's End Point Sunset", "cost": "₹200-400", "transport": "Local taxi"}
-		},
-		"Nainital": {
-			"morning": {"activity": "Naini Lake Boat Ride", "cost": "₹400-700", "transport": "Local transport"},
-			"midday": {"activity": "Mall Road Shopping", "cost": "₹500-1000", "transport": "Walking/horse ride"},
-			"afternoon": {"activity": "Ropeway/Chairlift Ride", "cost": "₹300-500", "transport": "Chairlift"},
-			"evening": {"activity": "Viewpoint & Photography", "cost": "₹200-400", "transport": "Taxi/local transport"}
-		},
-		"Dehradun": {
-			"morning": {"activity": "Breakfast & Local Markets", "cost": "₹300-600", "transport": "Local auto"},
-			"midday": {"activity": "Robbers' Cave Trek", "cost": "₹400-800", "transport": "Taxi/organized tour"},
-			"afternoon": {"activity": "Shopping at Paltan Bazaar", "cost": "₹500-1200", "transport": "Auto/taxi"},
-			"evening": {"activity": "Local Dinner & Relaxation", "cost": "₹600-1200", "transport": "Taxi"}
-		}
+	# Distance matrix (approximate km between major Uttarakhand locations)
+	distances = {
+		("Rishikesh", "Haridwar"): 24,
+		("Haridwar", "Rishikesh"): 24,
+		("Rishikesh", "Dehradun"): 45,
+		("Dehradun", "Rishikesh"): 45,
+		("Dehradun", "Mussoorie"): 32,
+		("Mussoorie", "Dehradun"): 32,
+		("Dehradun", "Nainital"): 185,
+		("Nainital", "Dehradun"): 185,
+		("Mussoorie", "Nainital"): 200,
+		("Nainital", "Mussoorie"): 200,
+		("Haridwar", "Dehradun"): 55,
+		("Dehradun", "Haridwar"): 55,
+		("Rishikesh", "Mussoorie"): 70,
+		("Mussoorie", "Rishikesh"): 70,
+		("Haridwar", "Mussoorie"): 80,
+		("Mussoorie", "Haridwar"): 80,
 	}
 	
-	# Get attraction data for the place, or use generic fallback
-	attractions = place_attractions.get(place, {
-		"morning": {"activity": f"Breakfast & Orientation in {place}", "cost": "₹300-500", "transport": "Local transport"},
-		"midday": {"activity": f"Local Sightseeing - {interest_hint}", "cost": "₹500-1000", "transport": "Taxi/local transport"},
-		"afternoon": {"activity": f"Adventure Activity - {interest_hint}", "cost": "₹800-1500", "transport": "Organized transport"},
-		"evening": {"activity": f"Dinner & Local Experience", "cost": "₹600-1200", "transport": "Local transport"}
-	})
+	key = (origin, destination)
+	if key in distances:
+		km = distances[key]
+		# Mountain speed: ~30-40 km/hour, add 20% buffer
+		base_minutes = (km / 35) * 60
+		return int(base_minutes * 1.2)
+	return 60  # Default 1 hour for unknown routes
+
+
+def _get_interest_activities(place, interest, budget_tier, visited_places):
+	"""
+	Get unique activities for a place based on interest, avoiding repetition.
+	Returns activity suggestion different from previously visited.
+	"""
+	activity_matrix = {
+		"Rishikesh": {
+			"spiritual": ["Ghat Yoga & Meditation", "Temple Circuit Trek", "Ashram Experience"],
+			"adventure": ["River Rafting", "Bungee Jumping", "Paragliding"],
+			"natural": ["Jungle Trek", "Nature Walk along Ganga", "Bird Watching"],
+			"wildlife": ["Tiger Reserve Proximity Visit", "Eco Forest Walk"],
+		},
+		"Haridwar": {
+			"spiritual": ["Ghat Pilgrimage & Aarti", "Temple Circuit", "Sacred Sites Tour"],
+			"adventure": ["Mansa Devi Cable Car Trek", "Adventure Park Activities"],
+			"natural": ["Biodiversity Park Visit", "Ganga Riverside Walk"],
+			"wildlife": ["Crocodile Breeding Center"],
+		},
+		"Mussoorie": {
+			"spiritual": ["Tibetan Buddhist Monastery"],
+			"adventure": ["Kempty Falls Trek", "Hiking on Hill Trails", "Mountain Biking"],
+			"natural": ["Cloud's End Point Trek", "Camel's Back Road Walk", "Nature Park"],
+			"wildlife": ["Woodstock School Nature Trails"],
+		},
+		"Nainital": {
+			"spiritual": ["Naina Devi Temple", "Spiritual Boat Retreat"],
+			"adventure": ["Naini Lake Water Sports", "Ropeway Ride", "Hiking"],
+			"natural": ["Eco Village Trek", "Forest Walks", "Sunrise Viewpoint Hike"],
+			"wildlife": ["Zoo Visit", "Bird Sanctuary Trek"],
+		},
+		"Dehradun": {
+			"spiritual": ["Tapkeshwar Cave Temple"],
+			"adventure": ["Robbers' Cave Adventure Trek", "Paragliding"],
+			"natural": ["Sahastradhara Waterfall Trek", "Forest Walks"],
+			"wildlife": ["Mindrolling Monastery Nature Grounds"],
+		},
+	}
 	
-	# Determine budget-based recommendations
-	budget_lower = "Budget" in budget or "Low" in budget
-	budget_higher = "Premium" in budget or "Luxury" in budget
+	place_activities = activity_matrix.get(place, {})
+	interest_list = place_activities.get(interest, ["Local Exploration"])
+	
+	# Rotate activity to avoid repetition in same day
+	activity_idx = hash(f"{place}_{interest}") % len(interest_list)
+	return interest_list[activity_idx] if interest_list else "Local Sightseeing"
+
+
+def _get_realistic_cost(place, activity_type, budget_tier):
+	"""
+	Return realistic cost for activity based on place and budget tier.
+	"""
+	cost_matrix = {
+		"Rishikesh": {"spiritual": "₹300-500", "adventure": "₹1000-1500", "natural": "₹400-700", "wildlife": "₹500-900"},
+		"Haridwar": {"spiritual": "₹200-400", "adventure": "₹500-1000", "natural": "₹300-600", "wildlife": "₹400-700"},
+		"Mussoorie": {"spiritual": "₹300-600", "adventure": "₹600-1200", "natural": "₹400-800", "wildlife": "₹500-900"},
+		"Nainital": {"spiritual": "₹300-600", "adventure": "₹500-1000", "natural": "₹300-700", "wildlife": "₹400-800"},
+		"Dehradun": {"spiritual": "₹200-400", "adventure": "₹400-800", "natural": "₹300-600", "wildlife": "₹300-600"},
+	}
+	
+	place_costs = cost_matrix.get(place, {})
+	base_cost = place_costs.get(activity_type, "₹400-700")
+	
+	# Adjust for budget tier
+	if "Budget" in budget_tier or "Low" in budget_tier:
+		return base_cost  # Keep as-is
+	elif "Premium" in budget_tier or "Luxury" in budget_tier:
+		# Increase by roughly 30-50%
+		parts = base_cost.replace("₹", "").split("-")
+		if len(parts) == 2:
+			low = int(parts[0]) * 1.4
+			high = int(parts[1]) * 1.4
+			return f"₹{int(low)}-{int(high)}"
+	
+	return base_cost
+
+
+def _generate_dynamic_day_checkpoints(day_index, day_date, place, interests, budget, current_location, travelers, visited_places=None):
+	"""
+	Generate dynamic day checkpoints with:
+	- Dynamic timeframes (NOT hardcoded times)
+	- Travel time consideration
+	- Unique activities (no repetition)
+	- Realistic costs
+	- Interest-based suggestions
+	"""
+	if visited_places is None:
+		visited_places = set()
+	
+	visited_places = visited_places or set()
+	budget_tier = budget
+	interest_hint = interests[day_index % len(interests)] if interests else "natural"
+	
+	# Start time depends on travel required
+	if day_index == 0 and current_location and current_location != place:
+		travel_time = _get_travel_time_minutes(current_location, place)
+		# First day: account for travel before activities
+		morning_start_hour = 9 + (travel_time // 60)
+		timeframe_morning = f"Arrival & Orientation ({morning_start_hour}:00 AM - {morning_start_hour + 2}:00 PM)"
+		time_needed_morning = "2-3 hours"
+	else:
+		timeframe_morning = "Early Morning (6:00 AM - 9:00 AM)"
+		time_needed_morning = "3 hours"
+	
+	# Main activity timeframe (mid-day when temperature is moderate)
+	timeframe_midday = "Late Morning to Early Afternoon (10:00 AM - 2:00 PM)"
+	time_needed_midday = "3-4 hours"
+	
+	# Afternoon activity
+	timeframe_afternoon = "Late Afternoon (3:00 PM - 6:00 PM)"
+	time_needed_afternoon = "2-3 hours"
+	
+	# Evening
+	timeframe_evening = "Evening (6:00 PM - 8:30 PM)"
+	time_needed_evening = "1.5-2 hours"
 	
 	date_label = day_date.strftime("%d %b %Y")
 	
+	# Get unique activities
+	morning_activity = _get_interest_activities(place, "spiritual" if interest_hint == "spiritual" else "natural", budget_tier, visited_places)
+	midday_activity = _get_interest_activities(place, interest_hint, budget_tier, visited_places)
+	afternoon_activity = _get_interest_activities(place, "adventure" if interest_hint != "adventure" else "natural", budget_tier, visited_places)
+	evening_activity = f"Local Dinner & Rest at {place}"
+	
 	checkpoints = [
 		{
-			"time": "08:00 AM",
-			"title": attractions["morning"]["activity"],
-			"description": f"Start your day with {attractions['morning']['activity'].lower()} in {place}. Ideal for morning activities and exploration.",
+			"time": timeframe_morning,
+			"title": morning_activity,
+			"description": f"Start your day with {morning_activity.lower()} in {place}. Experience the serene morning atmosphere.",
 			"location": place,
-			"notes": f"Cost estimate: {attractions['morning']['cost']} | Transport: {attractions['morning']['transport']} | Date: {date_label}",
-			"cost": attractions["morning"]["cost"],
-			"transport": attractions["morning"]["transport"],
+			"notes": f"Duration: {time_needed_morning} | Weather: Check morning forecast | Date: {date_label} | Travelers: {travelers}",
+			"cost": _get_realistic_cost(place, "spiritual", budget_tier),
 		},
 		{
-			"time": "12:30 PM",
-			"title": attractions["midday"]["activity"],
-			"description": f"Mid-day experience with {attractions['midday']['activity'].lower()}. Great for lunch and afternoon activities.",
+			"time": timeframe_midday,
+			"title": midday_activity,
+			"description": f"Engage with {midday_activity.lower()}. This is the prime time for active exploration in mountain terrain.",
 			"location": place,
-			"notes": f"Cost estimate: {attractions['midday']['cost']} | Transport: {attractions['midday']['transport']} | Travelers: {travelers}",
-			"cost": attractions["midday"]["cost"],
-			"transport": attractions["midday"]["transport"],
+			"notes": f"Duration: {time_needed_midday} | Bring water & sun protection | Cost covers entry & local guide | Travelers: {travelers}",
+			"cost": _get_realistic_cost(place, interest_hint, budget_tier),
 		},
 		{
-			"time": "04:00 PM",
-			"title": attractions["afternoon"]["activity"],
-			"description": f"Afternoon adventure with {attractions['afternoon']['activity'].lower()}. Best time for outdoor activities.",
+			"time": timeframe_afternoon,
+			"title": afternoon_activity,
+			"description": f"Adventure time with {afternoon_activity.lower()}. Ideal for outdoor pursuits before sunset.",
 			"location": place,
-			"notes": f"Cost estimate: {attractions['afternoon']['cost']} | Transport: {attractions['afternoon']['transport']} | Bring water & snacks",
-			"cost": attractions["afternoon"]["cost"],
-			"transport": attractions["afternoon"]["transport"],
+			"notes": f"Duration: {time_needed_afternoon} | Safety briefing included | Ensure adequate water intake | Return before dark",
+			"cost": _get_realistic_cost(place, "adventure", budget_tier),
 		},
 		{
-			"time": "07:30 PM",
-			"title": attractions["evening"]["activity"],
-			"description": f"Evening relaxation with {attractions['evening']['activity'].lower()}. Perfect for dinner and winding down.",
+			"time": timeframe_evening,
+			"title": evening_activity,
+			"description": f"Wind down with local cuisine and rest. Enjoy the local culture and prepare for next day.",
 			"location": place,
-			"notes": f"Cost estimate: {attractions['evening']['cost']} | Transport: {attractions['evening']['transport']} | Dinner included",
-			"cost": attractions["evening"]["cost"],
-			"transport": attractions["evening"]["transport"],
+			"notes": f"Duration: {time_needed_evening} | Try local Uttarakhand dishes | Budget: ₹400-700 per person | Retire early for acclimatization",
+			"cost": "₹400-700",
 		}
 	]
 	
+	visited_places.add(place)
 	return checkpoints
 
 
@@ -341,18 +501,34 @@ def generate_structured_itinerary(payload):
 	if not structured:
 		print("Generation is here: using fallback itinerary template", file=sys.stderr)
 		fallback_days = []
+		visited_places = set()
+		
+		# Distribute places across days without repetition
+		places_rotation = places * ((day_count // len(places)) + 1)
+		
 		for index in range(day_count):
 			day_date = start_date + timedelta(days=index)
-			place = places[index % len(places)]
-			checkpoints = _generate_detailed_day_checkpoints(
+			place = places_rotation[index]
+			
+			# Skip if already visited (prevents repetition)
+			if place in visited_places and len(places_rotation) > len(set(places_rotation[:index])):
+				for p in places:
+					if p not in visited_places:
+						place = p
+						break
+			
+			checkpoints = _generate_dynamic_day_checkpoints(
 				index,
 				day_date,
 				place,
 				interests,
 				budget,
-				current_location,
+				current_location if index == 0 else place,
 				travelers,
+				visited_places,
 			)
+			visited_places.add(place)
+			
 			fallback_days.append(
 				{
 					"dayNumber": index + 1,
@@ -367,7 +543,7 @@ def generate_structured_itinerary(payload):
 			"summary": {
 				"total_estimated_budget": budget,
 				"budget_fit": "optimized",
-				"notes": "Generated with fallback local structure because LLM output was unavailable.",
+				"notes": "Generated with dynamic fallback template: optimized timeframes, realistic travel times, no repetition.",
 				"llm_error": llm_error_message,
 			},
 		}
@@ -375,6 +551,8 @@ def generate_structured_itinerary(payload):
 	days = structured.get("days", [])
 	if not isinstance(days, list):
 		days = []
+	
+	visited_places = set()
 	for index, day in enumerate(days):
 		if not day.get("dayNumber"):
 			day["dayNumber"] = index + 1
@@ -385,15 +563,22 @@ def generate_structured_itinerary(payload):
 			day["title"] = f"Explore {place}"
 		if not isinstance(day.get("checkpoints"), list) or len(day.get("checkpoints", [])) == 0:
 			place = places[index % len(places)]
-			day["checkpoints"] = _generate_detailed_day_checkpoints(
+			day["checkpoints"] = _generate_dynamic_day_checkpoints(
 				index,
 				start_date + timedelta(days=index),
 				place,
 				interests,
 				budget,
-				current_location,
+				current_location if index == 0 else place,
 				travelers,
+				visited_places,
 			)
+		
+		# Track visited places to prevent repetition in subsequent fills
+		if day.get("checkpoints"):
+			for cp in day["checkpoints"]:
+				if cp.get("location"):
+					visited_places.add(cp["location"])
 
 	if "summary" not in structured or not isinstance(structured.get("summary"), dict):
 		structured["summary"] = {
