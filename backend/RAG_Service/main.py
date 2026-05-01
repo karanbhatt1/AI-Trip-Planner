@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import hashlib
 from datetime import datetime, timedelta
 
 from langchain_core.output_parsers import PydanticOutputParser
@@ -10,6 +11,7 @@ from pydantic import BaseModel
 from models import ItineraryPlan
 from vector_store import create_vector_db
 
+_cache = {}
 
 def _safe_date(date_value):
 	if not date_value:
@@ -38,6 +40,45 @@ def _as_list(value):
 		return [item.strip() for item in value.split(",") if item.strip()]
 	return []
 
+# 🔧 JSON repair + safe parse
+def _safe_parse_json(parser, text):
+    try:
+        return parser.parse(text)
+    except Exception:
+        text = text.strip()
+        text = text.replace(",}", "}").replace(",]", "]")
+
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1:
+            text = text[start:end+1]
+
+        try:
+            return parser.parse(text)
+        except Exception:
+            return None
+
+def _is_low_quality(plan):
+    if not plan:
+        return True
+    days = plan.get("days", [])
+    if not days:
+        return True
+    for d in days:
+        if not d.get("checkpoints"):
+            return True
+    return False
+
+
+# 🧠 Query complexity routing
+def _is_complex_query(places, num_days, interests):
+    if len(places) > 2:
+        return True
+    if num_days > 4:
+        return True
+    if len(interests) > 2:
+        return True
+    return False
 
 def _get_openai_key():
 	key = os.getenv("OPENAI_API_KEY")
@@ -46,13 +87,14 @@ def _get_openai_key():
 	return key
 
 
-def _build_llm():
+def _build_llm(model_name : str):
 	openai_api_key = _get_openai_key()
-	model_id = os.getenv("OPENAI_MODEL_ID", "gpt-4o-mini")
+	# model_id = os.getenv("OPENAI_MODEL_ID", "gpt-4o-mini") Static only using one model
 	return ChatOpenAI(
-		model=model_id,
+		model= model_name,
 		api_key=openai_api_key,
 		temperature=0.4,
+		max_tokens=3500
 	)
 
 
@@ -82,128 +124,63 @@ def _retrieve_context(payload, query_text):
 
 
 def _build_prompt(payload, context, format_instructions):
-	places = _as_list(payload.get("places_to_visit") or payload.get("destinations"))
-	current_location = str(payload.get("current_location") or payload.get("startingPosition") or "")
-	current_destination = str(payload.get("current_destination") or (places[0] if places else "") or "")
-	start_date = str(payload.get("start_date") or payload.get("startDate") or "")
-	end_date = str(payload.get("end_date") or payload.get("endDate") or "")
-	budget = str(payload.get("budget") or "Flexible")
-	travelers = _safe_int(payload.get("num_travelers") or payload.get("travelers"), 1)
-	num_days = _safe_int(payload.get("num_days"), 2)
-	interests = ", ".join(_as_list(payload.get("interests"))) or "general sightseeing"
-	special_requirements = str(payload.get("special_requirements") or payload.get("specialRequirements") or "")
+    places = _as_list(payload.get("places_to_visit") or payload.get("destinations"))
+    current_location = str(payload.get("current_location") or payload.get("startingPosition") or "")
+    current_destination = str(payload.get("current_destination") or (places[0] if places else "") or "")
+    start_date = str(payload.get("start_date") or payload.get("startDate") or "")
+    end_date = str(payload.get("end_date") or payload.get("endDate") or "")
+    budget = str(payload.get("budget") or "Flexible")
+    travelers = _safe_int(payload.get("num_travelers") or payload.get("travelers"), 1)
+    num_days = _safe_int(payload.get("num_days"), 2)
+    interests = ", ".join(_as_list(payload.get("interests"))) or "general sightseeing"
+    special_requirements = str(payload.get("special_requirements") or payload.get("specialRequirements") or "")
 
-	return f"""You are an expert Uttarakhand travel planner generating realistic, non-hallucinated itineraries.
+    # 🔥 Dynamic context trimming (smart limit)
+    MAX_CONTEXT_CHARS = 1000
+    trimmed_context = (context[:MAX_CONTEXT_CHARS] + "...") if context and len(context) > MAX_CONTEXT_CHARS else (context or "No context.")
 
-CRITICAL: Generate STRICT JSON ONLY. No markdown, no comments, no explanation outside JSON.
+    prompt = f"""
+You are a Uttarakhand travel planner. Output STRICT JSON only.
 
-Retrieved context (use this for verification of places/costs):
-{context or 'No retrieved context available.'}
+CONTEXT:
+{trimmed_context}
 
-TRIP PARAMETERS:
-- Start date: {start_date}
-- End date: {end_date}
-- Current location: {current_location}
-- Destinations: {', '.join(places)}
-- Budget range: {budget}
-- Number of travelers: {travelers}
-- Days: {num_days}
-- Interests: {interests}
-- Special requirements: {special_requirements}
+INPUT:
+start={start_date}, end={end_date}
+from={current_location}, to={current_destination}
+places={', '.join(places)}
+days={num_days}, travelers={travelers}
+budget={budget}, interests={interests}
+notes={special_requirements}
 
-REQUIRED OUTPUT SCHEMA (STRICT JSON ONLY):
-{{
-  "destination": [],
-  "interest": [],
-  "number_of_travelers": {travelers},
-  "budget": "{budget}",
-  "checkpoint": {{
-    "day1": {{
-      "activities": [
-        {{
-          "timeframe": {{
-            "time_range": "Dynamic range based on travel feasibility (e.g., 'Early Morning', 'Mid-Morning', 'Post Lunch', 'Late Afternoon'), NOT hardcoded times",
-            "destination": "",
-            "places_to_visit": [],
-            "time_needed": [],
-            "cost": [],
-            "location": [],
-            "weather_details": "",
-            "optimal_time_to_visit": ""
-          }}
-        }}
-      ],
-      "day_summary": ""
-    }}
-  }}
-}}
+OUTPUT SCHEMA:
+{format_instructions}
 
-CRITICAL GENERATION RULES:
+RULES:
+- No text outside JSON
+- Real Uttarakhand places only
+- No repeated places across days
+- Group nearby places
+- Avoid >100km same-day travel
+- Add 20–30% mountain buffer
 
-1. TIMEFRAME CALCULATION:
-   - DO NOT use hardcoded times like "08:00 AM", "12:30 PM"
-   - Calculate dynamic ranges based on:
-     - Travel distance between checkpoints
-     - Mountain terrain (slow travel = more buffer)
-     - Realistic activity duration
-     - Rest periods
-   - Use descriptive ranges: "Early Morning" (6-8 AM), "Late Afternoon" (4-6 PM)
-   - Ensure all activities fit within daylight and feasibility
+TIME:
+- Use ranges (Early Morning, Afternoon, Evening)
+- No exact timestamps
 
-2. NO REPETITION:
-   - NEVER visit the same place twice across different days
-   - If a place is visited on Day 1, exclude it from subsequent days
-   - Vary activities even for similar destination types
+BUDGET:
+- Food: ₹200–600 pp/day
+- Activities: ₹100–2000 pp/day
+- Stay within "{budget}"
 
-3. CHECKPOINT LOGIC:
-   - "places_to_visit" array length = "time_needed", "cost", "location" arrays
-   - Maintain logical travel flow (no zig-zag, no backtracking)
-   - Group nearby attractions in single day to minimize travel time
+STRUCTURE:
+- Keep arrays aligned
+- Each day must have activities
+- Add short day_summary
 
-4. BUDGET DISTRIBUTION:
-   - Total must stay within "{budget}" range
-   - Distribute across: transport, accommodation, food, activities
-   - Adjust activity costs based on budget tier
-   - Daily food budget: ₹200-600 per person
-   - Activity budget: ₹100-2000 per person per day
-
-5. MOUNTAIN TRAVEL CONSTRAINTS:
-   - Add 20-30% buffer time for mountain roads
-   - Avoid same-day distant travel (>100 km)
-   - Consider altitude impact and acclimatization
-   - Account for weather unpredictability
-
-6. INTEREST ALIGNMENT:
-   - Prioritize user interests (spiritual, wildlife, adventure, natural)
-   - Include meaningful experiences without forcing irrelevant places
-   - If interests are limited, deepen exploration of fewer places
-
-7. REALISTIC ATTRACTIONS:
-   - Use ONLY verified Uttarakhand locations
-   - Include real costs from retrieved context or standard rates
-   - Add weather notes and safety tips
-   - Mention local transport options
-
-8. OVERLONG TRIP HANDLING:
-   - If days > destinations × 2, add depth:
-     - Multi-day explorations of single region
-     - Rest days or flexibility days
-     - Nearby area expansions
-   - Do NOT repeat same checkpoint across days
-
-9. DAY SUMMARY:
-   - Concise (1-2 sentences)
-   - Highlights key activity type and destination
-   - Reflects feasibility and interest alignment
-
-10. JSON STRUCTURE MUST BE VALID:
-    - Proper array/object syntax
-    - No trailing commas
-    - Escaped quotes in strings
-    - Valid date/time formats
-
-OUTPUT: Valid JSON only. No explanation, no markdown, no commentary."""
-
+Ensure valid JSON (no trailing commas, proper quotes).
+"""
+    return prompt.strip()
 
 
 def _get_travel_time_minutes(origin, destination):
@@ -453,161 +430,183 @@ def _coerce_plan_dict(plan):
 
 
 def generate_structured_itinerary(payload):
-	start_date = _safe_date(payload.get("start_date") or payload.get("startDate"))
-	end_date = _safe_date(payload.get("end_date") or payload.get("endDate"))
-	budget = str(payload.get("budget") or "Flexible")
-	travelers = _safe_int(payload.get("num_travelers") or payload.get("travelers"), 1)
-	places = _as_list(payload.get("places_to_visit") or payload.get("destinations"))
-	interests = _as_list(payload.get("interests"))
-	special_requirements = str(payload.get("special_requirements") or payload.get("specialRequirements") or "")
-	current_location = str(payload.get("current_location") or payload.get("startingPosition") or "")
-	current_destination = str(payload.get("current_destination") or (places[0] if places else "") or "")
+    start_date = _safe_date(payload.get("start_date") or payload.get("startDate"))
+    end_date = _safe_date(payload.get("end_date") or payload.get("endDate"))
+    budget = str(payload.get("budget") or "Flexible")
+    travelers = _safe_int(payload.get("num_travelers") or payload.get("travelers"), 1)
+    places = _as_list(payload.get("places_to_visit") or payload.get("destinations"))
+    interests = _as_list(payload.get("interests"))
+    special_requirements = str(payload.get("special_requirements") or payload.get("specialRequirements") or "")
+    current_location = str(payload.get("current_location") or payload.get("startingPosition") or "")
+    current_destination = str(payload.get("current_destination") or (places[0] if places else "") or "")
 
-	if not start_date:
-		start_date = datetime.utcnow().date()
+    if not start_date:
+        start_date = datetime.utcnow().date()
 
-	if not end_date or end_date <= start_date:
-		end_date = start_date + timedelta(days=max(len(places), 2))
+    if not end_date or end_date <= start_date:
+        end_date = start_date + timedelta(days=max(len(places), 2))
 
-	day_count = (end_date - start_date).days
-	if day_count <= 0:
-		day_count = _safe_int(payload.get("num_days"), max(len(places), 2))
+    day_count = (end_date - start_date).days
+    if day_count <= 0:
+        day_count = _safe_int(payload.get("num_days"), max(len(places), 2))
 
-	if not places:
-		places = ["Rishikesh", "Haridwar", "Mussoorie", "Nainital", "Dehradun"]
+    if not places:
+        places = ["Rishikesh", "Haridwar", "Mussoorie", "Nainital", "Dehradun"]
 
-	structured: dict[str, object] = {}
-	llm_error_message = ""
-	try:
-		llm = _build_llm()
-		parser = PydanticOutputParser(pydantic_object=ItineraryPlan)
-		query_text = (
-			f"Plan a Uttarakhand trip for {travelers} traveler(s) from {start_date.isoformat()} to {end_date.isoformat()} "
-			f"with destinations {', '.join(places)} and current destination {current_destination}. "
-			f"Interests: {', '.join(interests) if interests else 'general sightseeing'}."
-		)
-		context = _retrieve_context(payload, query_text)
-		prompt = _build_prompt(payload, context, parser.get_format_instructions())
-		print("Generation is here: invoking OpenAI LLM", file=sys.stderr)
-		response_message = llm.invoke(prompt)
-		response = _coerce_llm_text(response_message)
-		parsed_plan = parser.parse(response)
-		structured = _coerce_plan_dict(parsed_plan)
-	except Exception as llm_exc:
-		structured = {}
-		llm_error_message = str(llm_exc)
-		print(f"Generation fallback triggered: {llm_error_message}", file=sys.stderr)
+    cache_key = hashlib.md5(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+    if cache_key in _cache:
+        print("Cache hit", file=sys.stderr)
+        return _cache[cache_key]
 
-	if not structured:
-		print("Generation is here: using fallback itinerary template", file=sys.stderr)
-		fallback_days = []
-		visited_places = set()
-		
-		# Distribute places across days without repetition
-		places_rotation = places * ((day_count // len(places)) + 1)
-		
-		for index in range(day_count):
-			day_date = start_date + timedelta(days=index)
-			place = places_rotation[index]
-			
-			# Skip if already visited (prevents repetition)
-			if place in visited_places and len(places_rotation) > len(set(places_rotation[:index])):
-				for p in places:
-					if p not in visited_places:
-						place = p
-						break
-			
-			checkpoints = _generate_dynamic_day_checkpoints(
-				index,
-				day_date,
-				place,
-				interests,
-				budget,
-				current_location if index == 0 else place,
-				travelers,
-				visited_places,
-			)
-			visited_places.add(place)
-			
-			fallback_days.append(
-				{
-					"dayNumber": index + 1,
-					"date": day_date.isoformat(),
-					"title": f"Explore {place}",
-					"summary": f"Day {index + 1}: Experience {place} with {interests[index % len(interests)] if interests else 'local sightseeing'} activities and realistic itinerary for {travelers} traveler(s).",
-					"checkpoints": checkpoints,
-				}
-			)
-		structured = {
-			"days": fallback_days,
-			"summary": {
-				"total_estimated_budget": budget,
-				"budget_fit": "optimized",
-				"notes": "Generated with dynamic fallback template: optimized timeframes, realistic travel times, no repetition.",
-				"llm_error": llm_error_message,
-			},
-		}
+    structured: dict[str, object] = {}
+    llm_error_message = ""
 
-	days = structured.get("days", [])
-	if not isinstance(days, list):
-		days = []
-	
-	visited_places = set()
-	for index, day in enumerate(days):
-		if not day.get("dayNumber"):
-			day["dayNumber"] = index + 1
-		if not day.get("date"):
-			day["date"] = (start_date + timedelta(days=index)).isoformat()
-		if not day.get("title"):
-			place = places[index % len(places)]
-			day["title"] = f"Explore {place}"
-		if not isinstance(day.get("checkpoints"), list) or len(day.get("checkpoints", [])) == 0:
-			place = places[index % len(places)]
-			day["checkpoints"] = _generate_dynamic_day_checkpoints(
-				index,
-				start_date + timedelta(days=index),
-				place,
-				interests,
-				budget,
-				current_location if index == 0 else place,
-				travelers,
-				visited_places,
-			)
-		
-		# Track visited places to prevent repetition in subsequent fills
-		if day.get("checkpoints"):
-			for cp in day["checkpoints"]:
-				if cp.get("location"):
-					visited_places.add(cp["location"])
+    try:
 
-	if "summary" not in structured or not isinstance(structured.get("summary"), dict):
-		structured["summary"] = {
-			"total_estimated_budget": budget,
-			"budget_fit": "optimized",
-			"notes": "Generated with OpenAI backed retrieval and generation.",
-		}
+        if _is_complex_query(places, day_count, interests):
+            primary_model = "gpt-5.3"
+            fallback_model = "gpt-4o-mini"
+        else:
+            primary_model = "gpt-4o-mini"
+            fallback_model = "gpt-5.3"
 
-	structured = {
-		"metadata": {
-			"travelers": travelers,
-			"budget": budget,
-			"places": places,
-			"interests": interests,
-			"specialRequirements": special_requirements,
-			"currentLocation": current_location,
-			"currentDestination": current_destination,
-		},
-		"days": days,
-		"summary": structured["summary"],
-	}
+        parser = PydanticOutputParser(pydantic_object=ItineraryPlan)
 
-	markdown = _to_markdown(structured, {"budget": budget})
-	return {
-		"itinerary": markdown,
-		"itineraryStructured": structured,
-		"checkpoints": [cp for day in days for cp in day.get("checkpoints", []) if isinstance(cp, dict)],
-	}
+        query_text = (
+            f"Plan a Uttarakhand trip for {travelers} traveler(s) from {start_date.isoformat()} to {end_date.isoformat()} "
+            f"with destinations {', '.join(places)} and current destination {current_destination}. "
+            f"Interests: {', '.join(interests) if interests else 'general sightseeing'}."
+        )
 
+        context = _retrieve_context(payload, query_text)
+        prompt = _build_prompt(payload, context, parser.get_format_instructions())
+
+        parsed_plan = None
+
+        try:
+            print(f"Using {primary_model}", file=sys.stderr)
+            llm_primary = _build_llm(primary_model)
+
+            response_message = llm_primary.invoke(prompt)
+            response = _coerce_llm_text(response_message)
+
+            parsed_plan = _safe_parse_json(parser, response)
+
+            if parsed_plan:
+                structured_candidate = _coerce_plan_dict(parsed_plan)
+                if _is_low_quality(structured_candidate):
+                    print("Low quality → fallback", file=sys.stderr)
+                    parsed_plan = None
+                else:
+                    structured = structured_candidate
+
+        except Exception as primary_error:
+            print(f"Primary failed: {primary_error}", file=sys.stderr)
+
+        # FALLBACK MODEL
+        if not parsed_plan:
+            try:
+                print(f"Falling back to {fallback_model}", file=sys.stderr)
+                llm_fallback = _build_llm(fallback_model)
+
+                response_message = llm_fallback.invoke(prompt)
+                response = _coerce_llm_text(response_message)
+
+                parsed_plan = _safe_parse_json(parser, response)
+
+                if parsed_plan:
+                    structured = _coerce_plan_dict(parsed_plan)
+
+            except Exception as fallback_error:
+                print(f"Fallback failed: {fallback_error}", file=sys.stderr)
+
+        if not structured:
+            llm_error_message = "Both models failed or returned low-quality output"
+
+    except Exception as llm_exc:
+        structured = {}
+        llm_error_message = str(llm_exc)
+        print(f"Generation fallback triggered: {llm_error_message}", file=sys.stderr)
+
+    # If LLMs fail to generate itinerary, use generic FALLBACK (your original system)
+    if not structured:
+        print("Using fallback itinerary template", file=sys.stderr)
+
+        fallback_days = []
+        visited_places = set()
+        places_rotation = places * ((day_count // len(places)) + 1)
+
+        for index in range(day_count):
+            day_date = start_date + timedelta(days=index)
+            place = places_rotation[index]
+
+            if place in visited_places:
+                for p in places:
+                    if p not in visited_places:
+                        place = p
+                        break
+
+            checkpoints = _generate_dynamic_day_checkpoints(
+                index,
+                day_date,
+                place,
+                interests,
+                budget,
+                current_location if index == 0 else place,
+                travelers,
+                visited_places,
+            )
+
+            visited_places.add(place)
+
+            fallback_days.append({
+                "dayNumber": index + 1,
+                "date": day_date.isoformat(),
+                "title": f"Explore {place}",
+                "summary": f"Day {index + 1}: Experience {place}",
+                "checkpoints": checkpoints,
+            })
+
+        structured = {
+            "days": fallback_days,
+            "summary": {
+                "total_estimated_budget": budget,
+                "budget_fit": "optimized",
+                "notes": "Generated via fallback system",
+                "llm_error": llm_error_message,
+            },
+        }
+
+    days = structured.get("days", [])
+    if not isinstance(days, list):
+        days = []
+
+    structured = {
+        "metadata": {
+            "travelers": travelers,
+            "budget": budget,
+            "places": places,
+            "interests": interests,
+            "specialRequirements": special_requirements,
+            "currentLocation": current_location,
+            "currentDestination": current_destination,
+        },
+        "days": days,
+        "summary": structured.get("summary", {}),
+    }
+
+    markdown = _to_markdown(structured, {"budget": budget})
+
+    result = {
+        "itinerary": markdown,
+        "itineraryStructured": structured,
+        "checkpoints": [
+            cp for day in days for cp in day.get("checkpoints", []) if isinstance(cp, dict)
+        ],
+    }
+    _cache[cache_key] = result
+
+    return result
 
 def _main():
 	try:
