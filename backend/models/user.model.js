@@ -42,7 +42,7 @@ userSchema.index(
     {
         unique: true,
         partialFilterExpression: {
-            phone: { $type: "string", $ne: "" }
+            phone: { $type: "string", $gt: "" }
         }
     }
 )
@@ -53,7 +53,7 @@ userSchema.index(
     {
         unique: true,
         partialFilterExpression: {
-            email: { $type: "string", $ne: "" }
+            email: { $type: "string", $gt: "" }
         }
     }
 )

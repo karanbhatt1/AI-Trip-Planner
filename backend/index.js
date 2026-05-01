@@ -58,6 +58,7 @@ app.use('/api', apiLimiter);
 mongoose.connect(process.env.MONGO_URI)
 .then(async () => {
     console.log("MongoDB Connected successfully!");
+    
     try {
       await User.syncIndexes();
       console.log('User indexes synchronized successfully');
