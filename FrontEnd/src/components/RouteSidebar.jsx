@@ -1,4 +1,4 @@
-import { Clock, MapPin, Navigation, Info } from 'lucide-react';
+import { Clock, MapPin, Navigation, Info } from 'lucide-react';  // these are icon components from lucide-react library
 
 const RouteSidebar = ({
   checkpoints,
@@ -84,6 +84,12 @@ const RouteSidebar = ({
         ) : null}
       </div>
 
+       <div className="p-4 bg-slate-900/50 border-t border-slate-700">
+        <p className="text-xs text-slate-500 text-center">
+          Click on any checkpoint to highlight it on the map
+        </p>
+      </div>
+
       {/* Checkpoints List */}
       <div className="max-h-96 overflow-y-auto">
         {checkpoints.map((checkpoint, index) => (
@@ -152,12 +158,6 @@ const RouteSidebar = ({
         ))}
       </div>
 
-      {/* Footer */}
-      <div className="p-4 bg-slate-900/50 border-t border-slate-700">
-        <p className="text-xs text-slate-500 text-center">
-          Click on any checkpoint to highlight it on the map
-        </p>
-      </div>
     </div>
   );
 };

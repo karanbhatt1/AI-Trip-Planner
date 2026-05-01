@@ -2,25 +2,16 @@ import { useEffect, useState } from 'react';
 import { Cloud, Droplets, Eye, MapPin, Navigation, Wind } from 'lucide-react';
 import MapBoxRoute from './MapBoxRoute';
 
-/**
- * Separate Routing & Weather Section
- * Displays route information and weather forecast below the trip planning form
- * Includes:
- * - MapBox-based route visualization
- * - Location verification
- * - Weather forecast
- * - Cost estimates
- */
+
+
 export default function RoutingWeatherSection({ tripData, checkpoints = [] }) {
   const [weather, setWeather] = useState({});
   const [weatherLoading, setWeatherLoading] = useState(false);
   const [routeData, setRouteData] = useState(null);
   const [verifiedLocations, setVerifiedLocations] = useState({});
 
-  /**
-   * Fetch weather for destinations
-   * Using OpenWeather API (free tier)
-   */
+
+
   useEffect(() => {
     const fetchWeather = async () => {
       if (!checkpoints || checkpoints.length === 0) return;
@@ -87,7 +78,6 @@ export default function RoutingWeatherSection({ tripData, checkpoints = [] }) {
   }, [checkpoints]);
 
   const getWeatherDescription = (code) => {
-    // WMO Weather interpretation codes
     const codes = {
       0: 'Clear sky',
       1: 'Mainly clear',

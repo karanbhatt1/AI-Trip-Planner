@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { MapPin, RefreshCw, AlertCircle } from 'lucide-react';
+import { MapPin, RefreshCw, AlertCircle } from 'lucide-react'; //svg icons components from lucide-react library
 import RouteMap from './RouteMap';
 import RouteSidebar from './RouteSidebar';
 import { apiRequest } from '../services/apiClient';

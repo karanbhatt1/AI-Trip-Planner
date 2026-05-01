@@ -82,7 +82,7 @@ const RouteMap = ({ checkpoints, onCheckpointClick, selectedCheckpoint, starting
         waypoints,
         routeWhileDragging: false,
         addWaypoints: false,
-        createMarker: () => null, // We'll handle markers ourselves
+        createMarker: () => null,
         lineOptions: {
           styles: [{ color: '#3b82f6', weight: 4, opacity: 0.8 }]
         }

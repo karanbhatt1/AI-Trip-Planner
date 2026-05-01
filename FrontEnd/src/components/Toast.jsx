@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { CheckCircle, AlertCircle, Info, X } from 'lucide-react';
 
-export default function Toast({ isOpen, type = 'info', title, message, onClose, duration = 4000 }) {
+export default function Toast({ isOpen, type = 'info', title, message, onClose, duration = 3000 }) {
   useEffect(() => {
     if (isOpen) {
       const timer = setTimeout(onClose, duration);
@@ -12,7 +12,7 @@ export default function Toast({ isOpen, type = 'info', title, message, onClose, 
   if (!isOpen) return null;
 
   const styles = {
-    success: { bg: 'bg-emerald-900/90', border: 'border-emerald-600', icon: CheckCircle, iconColor: 'text-emerald-400' },
+    success: { bg: 'bg-emerald-900/90', border: 'border-emerald-600', icon: CheckCircle, iconColor: 'text-emerald-500' },
     error: { bg: 'bg-red-900/90', border: 'border-red-600', icon: AlertCircle, iconColor: 'text-red-400' },
     warning: { bg: 'bg-amber-900/90', border: 'border-amber-600', icon: AlertCircle, iconColor: 'text-amber-400' },
     info: { bg: 'bg-blue-900/90', border: 'border-blue-600', icon: Info, iconColor: 'text-blue-400' },

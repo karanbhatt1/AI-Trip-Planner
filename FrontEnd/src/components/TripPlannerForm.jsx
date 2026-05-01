@@ -13,7 +13,11 @@ import {
 } from '../utils/itineraryParser';
 
 export default function TripPlannerForm() {
-  const { isAuthenticated, isInitializing, token, user } = useAuth();
+
+
+  const { isAuthenticated, isInitializing, token, user } = useAuth();  // destructuring the auth context to get necessary values  
+  
+  //props---> 
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [travelers, setTravelers] = useState('2');
@@ -56,6 +60,7 @@ export default function TripPlannerForm() {
     specialRequirements: '',
   });
   const [itineraryViewMode, setItineraryViewMode] = useState('structured'); // 'structured' or 'raw'
+  // props end
 
   const formatDateInput = (date) => {
     const year = date.getFullYear();
@@ -177,7 +182,7 @@ export default function TripPlannerForm() {
     setEditableSavedItinerary('');
     setEditableStructuredItinerary(null);
     setIsItineraryGenerated(false);
-  };
+  }; // Arrow Function to reset the trip planner form to its initial state
 
   const handleStartDateChange = (event) => {
     const nextStartDate = event.target.value;
@@ -205,6 +210,7 @@ export default function TripPlannerForm() {
 
       if (current.length >= limit) {
         setFormError(`You can select at most ${limit} ${limit === 4 ? 'options' : 'items'} here.`);
+        // User can only select atmost 4 destinations and 4 interests.
         return current;
       }
 
@@ -212,7 +218,7 @@ export default function TripPlannerForm() {
         emptySelectionReset(value, true);
       }
 
-      return [...current, value];
+      return [...current, value]; // ... is the spread operator which is used to create a new array by spreading the elements of the current array and adding the new value at the end.
     });
   };
 
@@ -226,6 +232,7 @@ export default function TripPlannerForm() {
 
       if (current.length >= 4) {
         setFormError('You can select at most 4 interests.');
+        window.alert("You can select at most 4 interests.");
         return current;
       }
 
@@ -247,6 +254,7 @@ export default function TripPlannerForm() {
 
       if (current.length >= 4) {
         setFormError('You can select at most 4 preferred destinations.');
+        window.alert("You can select at most 4 preferred destinations.");
         return current;
       }
 
@@ -263,6 +271,7 @@ export default function TripPlannerForm() {
       setSelectedDestinations((current) => {
         if (current.length >= 4) {
           setFormError('You can select at most 4 preferred destinations.');
+          window.alert("You can select at most 4 preferred destinations.");
           return current;
         }
         return [...current, 'Others'];
@@ -280,6 +289,7 @@ export default function TripPlannerForm() {
       }
       if (current.length >= 4) {
         setFormError('You can select at most 4 preferred destinations.');
+        window.alert("You can select at most 4 preferred destinations.");
         return current;
       }
 
