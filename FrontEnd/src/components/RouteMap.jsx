@@ -17,18 +17,35 @@ const RouteMap = ({ checkpoints, onCheckpointClick, selectedCheckpoint, starting
   const [map, setMap] = useState(null);
   const [routingControl, setRoutingControl] = useState(null);
 
+  const isValidPoint = (point) => Number.isFinite(point?.lat) && Number.isFinite(point?.lng);
+
+  const formatCoordinate = (value) => (Number.isFinite(value) ? value.toFixed(4) : 'N/A');
+
+  const createMapsUrl = (point) => {
+    if (!point) return '';
+
+    if (Number.isFinite(point.lat) && Number.isFinite(point.lng)) {
+      return `https://www.google.com/maps/search/?api=1&query=${point.lat},${point.lng}`;
+    }
+
+    const query = point.location || point.name || '';
+    if (!query) return '';
+
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+  };
+
   // Calculate center point of all checkpoints including starting location
   const getCenter = () => {
-    let allPoints = [...(checkpoints || [])];
+    let allPoints = [...(checkpoints || []).filter(isValidPoint)];
     
-    if (startingLocation) {
+    if (isValidPoint(startingLocation)) {
       allPoints.unshift(startingLocation);
     }
     
     if (allPoints.length === 0) return [28.6139, 77.2090]; // Default to Delhi
 
-    const lats = allPoints.map(cp => cp.lat);
-    const lngs = allPoints.map(cp => cp.lng);
+    const lats = allPoints.map((cp) => cp.lat);
+    const lngs = allPoints.map((cp) => cp.lng);
 
     const centerLat = (Math.min(...lats) + Math.max(...lats)) / 2;
     const centerLng = (Math.min(...lngs) + Math.max(...lngs)) / 2;
@@ -40,12 +57,12 @@ const RouteMap = ({ checkpoints, onCheckpointClick, selectedCheckpoint, starting
   const getWaypoints = () => {
     let allPoints = [];
     
-    if (startingLocation) {
+    if (isValidPoint(startingLocation)) {
       allPoints.push(startingLocation);
     }
     
     if (checkpoints && checkpoints.length > 0) {
-      allPoints = [...allPoints, ...checkpoints];
+      allPoints = [...allPoints, ...checkpoints.filter(isValidPoint)];
     }
     
     if (allPoints.length === 0) return [];
@@ -53,7 +70,7 @@ const RouteMap = ({ checkpoints, onCheckpointClick, selectedCheckpoint, starting
   };
 
   useEffect(() => {
-    if (map && checkpoints && checkpoints.length > 1) {
+    if (map && checkpoints && checkpoints.filter(isValidPoint).length > 1) {
       // Remove existing routing control
       if (routingControl) {
         map.removeControl(routingControl);
@@ -165,21 +182,21 @@ const RouteMap = ({ checkpoints, onCheckpointClick, selectedCheckpoint, starting
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
 
-        {startingLocation ? (
+        {isValidPoint(startingLocation) ? (
           <Marker position={[startingLocation.lat, startingLocation.lng]} icon={createStartIcon()}>
             <Popup>
               <div className="p-2">
                 <h3 className="font-bold text-base">Current Location</h3>
                 <p className="text-sm text-gray-600 mt-1">{startingLocation.name || 'Detected location'}</p>
                 <div className="mt-2 text-xs text-gray-500">
-                  Lat: {startingLocation.lat.toFixed(4)}, Lng: {startingLocation.lng.toFixed(4)}
+                  Lat: {formatCoordinate(startingLocation.lat)}, Lng: {formatCoordinate(startingLocation.lng)}
                 </div>
               </div>
             </Popup>
           </Marker>
         ) : null}
 
-        {checkpoints.map((checkpoint, index) => (
+        {checkpoints.filter(isValidPoint).map((checkpoint, index) => (
           <Marker
             key={`${checkpoint.name}-${index}`}
             position={[checkpoint.lat, checkpoint.lng]}
@@ -194,13 +211,23 @@ const RouteMap = ({ checkpoints, onCheckpointClick, selectedCheckpoint, starting
                 {checkpoint.description && (
                   <p className="text-sm text-gray-600 mt-1">{checkpoint.description}</p>
                 )}
+                {createMapsUrl(checkpoint) ? (
+                  <a
+                    href={createMapsUrl(checkpoint)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-2 inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-700"
+                  >
+                    Open location in Maps
+                  </a>
+                ) : null}
                 {checkpoint.why && (
                   <div className="mt-2 p-2 bg-blue-50 rounded text-sm">
                     <strong>Why here?</strong> {checkpoint.why}
                   </div>
                 )}
                 <div className="mt-2 text-xs text-gray-500">
-                  Lat: {checkpoint.lat.toFixed(4)}, Lng: {checkpoint.lng.toFixed(4)}
+                  Lat: {formatCoordinate(checkpoint.lat)}, Lng: {formatCoordinate(checkpoint.lng)}
                 </div>
               </div>
             </Popup>

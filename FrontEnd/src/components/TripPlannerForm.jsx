@@ -155,6 +155,30 @@ export default function TripPlannerForm() {
     );
   };
 
+  const resetPlannerForm = () => {
+    setStartDate('');
+    setEndDate('');
+    setTravelers('2');
+    setBudgetRange('8-16k');
+    setCustomBudget('');
+    setSelectedInterests([]);
+    setSelectedDestinations([]);
+    setCustomDestination('');
+    setSpecialRequirements('');
+    setStartingPosition('');
+    setStartingCoordinates('');
+    setFormError('');
+    setFormSuccess('');
+    setSavedTrip(null);
+    setLatestBackendResponse(null);
+    setResponseView('summary');
+    setSelectedTripDetails(null);
+    setSelectedTripView('summary');
+    setEditableSavedItinerary('');
+    setEditableStructuredItinerary(null);
+    setIsItineraryGenerated(false);
+  };
+
   const handleStartDateChange = (event) => {
     const nextStartDate = event.target.value;
     const nextMinEndDate = getMinEndDate(nextStartDate);
@@ -167,22 +191,103 @@ export default function TripPlannerForm() {
     }
   };
 
-  const toggleItem = (value, currentItems, setItems) => {
+  const toggleSelectionWithLimit = (currentItems, value, setItems, limit, emptySelectionReset = null) => {
     setFormError('');
     setFormSuccess('');
 
-    setItems(
-      currentItems.includes(value)
-        ? currentItems.filter((item) => item !== value)
-        : [...currentItems, value]
-    );
+    setItems((current) => {
+      if (current.includes(value)) {
+        if (emptySelectionReset) {
+          emptySelectionReset(value, false);
+        }
+        return current.filter((item) => item !== value);
+      }
+
+      if (current.length >= limit) {
+        setFormError(`You can select at most ${limit} ${limit === 4 ? 'options' : 'items'} here.`);
+        return current;
+      }
+
+      if (emptySelectionReset) {
+        emptySelectionReset(value, true);
+      }
+
+      return [...current, value];
+    });
+  };
+
+  const toggleInterest = (value) => {
+    setFormError('');
+    setFormSuccess('');
+    setSelectedInterests((current) => {
+      if (current.includes(value)) {
+        return current.filter((item) => item !== value);
+      }
+
+      if (current.length >= 4) {
+        setFormError('You can select at most 4 interests.');
+        return current;
+      }
+
+      return [...current, value];
+    });
   };
 
   const toggleDestination = (place) => {
-    toggleItem(place, selectedDestinations, setSelectedDestinations);
-    if (place === 'Others' && selectedDestinations.includes('Others')) {
-      setCustomDestination('');
+    setFormError('');
+    setFormSuccess('');
+    setSelectedDestinations((current) => {
+      if (current.includes(place)) {
+        const next = current.filter((item) => item !== place);
+        if (place === 'Others') {
+          setCustomDestination('');
+        }
+        return next;
+      }
+
+      if (current.length >= 4) {
+        setFormError('You can select at most 4 preferred destinations.');
+        return current;
+      }
+
+      if (place === 'Others') {
+        setCustomDestination('');
+      }
+      return [...current, place];
+    });
+  };
+
+  const handleDestinationInputChange = (value) => {
+    setCustomDestination(value);
+    if (!selectedDestinations.includes('Others')) {
+      setSelectedDestinations((current) => {
+        if (current.length >= 4) {
+          setFormError('You can select at most 4 preferred destinations.');
+          return current;
+        }
+        return [...current, 'Others'];
+      });
     }
+  };
+
+  const handleOthersDestinationToggle = (place) => {
+    setFormError('');
+    setFormSuccess('');
+    setSelectedDestinations((current) => {
+      if (current.includes(place)) {
+        const next = current.filter((item) => item !== place);
+        setCustomDestination('');
+      }
+      if (current.length >= 4) {
+        setFormError('You can select at most 4 preferred destinations.');
+        return current;
+      }
+
+      if (place === 'Others') {
+        setCustomDestination('');
+      }
+      return [...current, place];
+    });
   };
 
   const toCsv = (value) => (Array.isArray(value) ? value.join(', ') : '');
@@ -344,6 +449,15 @@ export default function TripPlannerForm() {
     setIsItineraryGenerated(false);
   };
 
+  const handleSaveGeneratedItinerary = () => {
+    if (!savedTrip) {
+      return;
+    }
+
+    resetPlannerForm();
+    setFormSuccess('Itinerary saved. The planner is ready for a new trip.');
+  };
+
   const confirmDeleteTrip = async () => {
     const trip = savedTrips.find((t) => t._id === confirmDialog.tripId);
     if (!trip) {
@@ -436,7 +550,7 @@ export default function TripPlannerForm() {
     }
 
     if (normalizedDestinations.length === 0) {
-      setFormError('Please choose at least one place of interest.');
+      setFormError('Please choose at least one destination.');
       return;
     }
 
@@ -453,8 +567,8 @@ export default function TripPlannerForm() {
             endDate,
             travelers,
             budget: budgetRange === 'custom' ? customBudget.trim() : budgetRange,
-            interests: selectedInterests,
-            destinations: normalizedDestinations,
+            interests: selectedInterests.slice(0, 4),
+            destinations: normalizedDestinations.slice(0, 4),
             currentDestination: normalizedDestinations[0] || customDestination.trim() || '',
             specialRequirements,
             startingPosition,
@@ -722,11 +836,9 @@ export default function TripPlannerForm() {
                 onChange={(event) => setBudgetRange(event.target.value)}
                 className="w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg text-white focus:border-teal-500"
               >
-                <option value="3-8k">3-8k</option>
-                <option value="8-16k">8-16k</option>
+                <option value="3-8k">Starter (3000-8000)</option>
+                <option value="8-16k">Basic (8000-16000k)</option>
                 <option value="Moderate (₹25k-50k)">Moderate (₹25k-50k)</option>
-                <option value="Comfort (₹50k-1L)">Comfort (₹50k-1L)</option>
-                <option value="Luxury (₹1L+)">Luxury (₹1L+)</option>
                 <option value="custom">Custom</option>
               </select>
               {budgetRange === 'custom' ? (
@@ -748,7 +860,7 @@ export default function TripPlannerForm() {
                 <button
                   key={tag}
                   type="button"
-                  onClick={() => toggleItem(tag, selectedInterests, setSelectedInterests)}
+                  onClick={() => toggleInterest(tag)}
                   className={`px-5 py-2 rounded-full text-sm transition cursor-pointer border ${
                     selectedInterests.includes(tag)
                       ? 'bg-teal-400 text-slate-950 border-teal-300 shadow-lg shadow-teal-500/20'
@@ -783,7 +895,7 @@ export default function TripPlannerForm() {
               <input
                 type="text"
                 value={customDestination}
-                onChange={(event) => setCustomDestination(event.target.value)}
+                onChange={(event) => handleDestinationInputChange(event.target.value)}
                 placeholder="Enter your preferred destination"
                 className="mt-3 w-full px-4 py-3 bg-slate-900 border border-slate-600 rounded-lg text-white placeholder-slate-500 focus:border-teal-500 outline-none transition"
               />
@@ -893,7 +1005,7 @@ export default function TripPlannerForm() {
                       <p className="text-slate-500 text-sm mb-2">Interests</p>
                       <div className="flex flex-wrap gap-2">
                         {(latestBackendResponse.trip?.interests || []).length > 0 ? (
-                          (latestBackendResponse.trip?.interests || []).map((interest) => (
+                          (latestBackendResponse.trip?.interests || []).slice(0, 4).map((interest) => (
                             <button
                               key={interest}
                               type="button"
@@ -913,7 +1025,7 @@ export default function TripPlannerForm() {
                       <p className="text-slate-500 text-sm mb-2">Destinations</p>
                       <div className="flex flex-wrap gap-2">
                         {(latestBackendResponse.trip?.destinations || []).length > 0 ? (
-                          (latestBackendResponse.trip?.destinations || []).map((destination) => (
+                          (latestBackendResponse.trip?.destinations || []).slice(0, 4).map((destination) => (
                             <button
                               key={destination}
                               type="button"
@@ -957,7 +1069,7 @@ export default function TripPlannerForm() {
                 <div>
                   <p className="text-slate-500 mb-2">Interests</p>
                   <div className="flex flex-wrap gap-2">
-                    {(savedTrip.interests || []).map((interest) => (
+                    {(savedTrip.interests || []).slice(0, 4).map((interest) => (
                       <span key={interest} className="rounded-full border border-teal-400/30 bg-teal-500/10 px-3 py-1 text-teal-100">
                         {interest}
                       </span>
@@ -968,7 +1080,7 @@ export default function TripPlannerForm() {
                 <div>
                   <p className="text-slate-500 mb-2">Destinations</p>
                   <div className="flex flex-wrap gap-2">
-                    {(savedTrip.destinations || []).map((destination) => (
+                    {(savedTrip.destinations || []).slice(0, 4).map((destination) => (
                       <span key={destination} className="rounded-full border border-slate-600 bg-slate-800 px-3 py-1 text-slate-200">
                         {destination}
                       </span>
@@ -999,6 +1111,7 @@ export default function TripPlannerForm() {
                       itineraryText={editableSavedItinerary}
                       itineraryStructured={editableStructuredItinerary}
                       onStructuredChange={saveStructuredItinerary}
+                      currentLocation={startingPosition}
                     />
                   ) : (
                     <textarea
@@ -1009,15 +1122,29 @@ export default function TripPlannerForm() {
                       placeholder="Edit your itinerary here..."
                     />
                   )}
+
+                  <button
+                    type="button"
+                    onClick={handleSaveGeneratedItinerary}
+                    className="mt-4 w-full rounded-xl border border-teal-500/50 bg-teal-500/10 px-4 py-3 text-sm font-semibold text-teal-100 hover:bg-teal-500/20 transition"
+                  >
+                    Save Itinerary
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const section = document.getElementById('route-visualization-section');
+                      section?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }}
+                    className="mt-2 inline-flex items-center rounded-lg border border-slate-600 bg-slate-800/60 px-3 py-1.5 text-xs font-medium text-slate-200 hover:border-teal-400 hover:text-teal-200 transition"
+                  >
+                    Go to Route Visualization
+                  </button>
                 </div>
               ) : null}
             </div>
           ) : null}
-
-          {/* Route Visualization */}
-          {savedTrip?.itinerary && (
-            <RouteVisualizerSection tripData={savedTrip} showTitle={true} />
-          )}
 
           <button type="submit" disabled={isSubmitting || isItineraryGenerated || isGeneratingItinerary} className="w-full py-5 bg-teal-500 text-slate-900 font-bold text-lg rounded-xl hover:bg-teal-400 transition shadow-lg flex items-center justify-center gap-3 disabled:opacity-60 disabled:cursor-not-allowed">
             <Sparkles className="w-6 h-6" />
@@ -1035,6 +1162,12 @@ export default function TripPlannerForm() {
             </button>
           ) : null}
         </form>
+
+        {savedTrip?.itinerary ? (
+          <div id="route-visualization-section" className="mt-8">
+            <RouteVisualizerSection tripData={savedTrip} showTitle={true} />
+          </div>
+        ) : null}
       </div>
 
       {selectedTripDetails ? (
@@ -1232,6 +1365,7 @@ export default function TripPlannerForm() {
                   <ItineraryDisplay
                     itineraryText={selectedTripDetails.itinerary}
                     itineraryStructured={selectedTripDetails.itineraryStructured}
+                    currentLocation={selectedTripDetails?.startingPosition}
                   />
                 </div>
               </div>

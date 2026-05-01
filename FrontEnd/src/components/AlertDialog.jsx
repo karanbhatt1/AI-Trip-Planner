@@ -18,7 +18,7 @@ export default function AlertDialog({ isOpen, title, message, onClose, type = "i
         ) : null}
         
         <p className="mb-6">{message}</p>
-
+        
         <button
           type="button"
           onClick={onClose}

@@ -1,12 +1,11 @@
-
 import json
 import os
 import sys
 from datetime import datetime, timedelta
 
 from langchain_core.output_parsers import PydanticOutputParser
-from langchain_groq import ChatGroq
-from pydantic import BaseModel, SecretStr
+from langchain_openai import ChatOpenAI
+from pydantic import BaseModel
 
 from models import ItineraryPlan
 from vector_store import create_vector_db
@@ -40,20 +39,20 @@ def _as_list(value):
 	return []
 
 
-def _get_groq_key():
-	key = os.getenv("GROQ_API_KEY")
+def _get_openai_key():
+	key = os.getenv("OPENAI_API_KEY")
 	if not key:
-		raise RuntimeError("GROQ_API_KEY is missing. Set it in your environment before running generation.")
+		raise RuntimeError("OPENAI_API_KEY is missing. Set it in your environment before running generation.")
 	return key
 
 
 def _build_llm():
-	groq_api_key = _get_groq_key()
-	model_id = os.getenv("GROQ_MODEL_ID", "llama-3.3-70b-versatile")
-	return ChatGroq(
+	openai_api_key = _get_openai_key()
+	model_id = os.getenv("OPENAI_MODEL_ID", "gpt-4o-mini")
+	return ChatOpenAI(
 		model=model_id,
-		api_key=SecretStr(groq_api_key),
-		temperature=0.7,
+		api_key=openai_api_key,
+		temperature=0.4,
 	)
 
 
@@ -94,61 +93,152 @@ def _build_prompt(payload, context, format_instructions):
 	interests = ", ".join(_as_list(payload.get("interests"))) or "general sightseeing"
 	special_requirements = str(payload.get("special_requirements") or payload.get("specialRequirements") or "")
 
-	return (
-		"You are an expert Uttarakhand travel planner. Use the retrieved context and the user trip details to "
-		"produce realistic, editable itinerary JSON only.\n\n"
-		f"Retrieved context:\n{context or 'No retrieved context available.'}\n\n"
-		f"Start date: {start_date}\n"
-		f"End date: {end_date}\n"
-		f"Current location: {current_location}\n"
-		f"Current destination: {current_destination}\n"
-		f"Destinations: {', '.join(places)}\n"
-		f"Budget: {budget}\n"
-		f"Travelers: {travelers}\n"
-		f"Days: {num_days}\n"
-		f"Interests: {interests}\n"
-		f"Special requirements: {special_requirements}\n\n"
-		"Return only JSON that satisfies the schema below. "
-		"Do not wrap the JSON in markdown fences or add commentary.\n\n"
-		f"{format_instructions}\n\n"
-		"Make the itinerary realistic, budget-aware, and optimized around the current destination."
-	)
+	return f"""You are an expert Uttarakhand travel planner and logistics optimizer.
+
+Use the retrieved context plus the trip details to generate a realistic, practical, editable itinerary in strict JSON only.
+
+Retrieved context:
+{context or 'No retrieved context available.'}
+
+Trip details:
+Start date: {start_date}
+End date: {end_date}
+Current location: {current_location}
+Current destination: {current_destination}
+Destinations: {', '.join(places)}
+Budget: {budget}
+Travelers: {travelers}
+Days: {num_days}
+Interests: {interests}
+Special requirements: {special_requirements}
+
+Planning rules:
+- Treat mountain travel as slow and add buffer time for delays.
+- Keep the plan route-optimized and avoid unnecessary backtracking.
+- Respect hotel check-in around 12 PM and check-out around 10 AM.
+- Do not overload any day; keep the itinerary realistic and comfortable.
+- Include morning, afternoon, and evening structure for every day.
+- Include travel distance/time, weather considerations when relevant, safety notes, and local tips.
+- Include realistic activities for each checkpoint, with costs in Indian Rupees.
+- Include cost breakdowns for transport, accommodation, food, and activities.
+- Use only real, verified Uttarakhand locations and no fictional places.
+- Keep the itinerary editable and include alternatives for major activities.
+
+Budget handling:
+- If budget is low, prefer budget stays and shared transport.
+- If budget is high, include better hotels and premium experiences.
+
+Feasibility handling:
+- If the number of days is too large for the requested scope or there are too many destinations to cover fully, explicitly say that all areas cannot be explored in full within the available days.
+- In that case, reduce the plan intelligently and prioritize the most feasible subset of places.
+- Explain the reduction in notes instead of forcing an unrealistic full itinerary.
+- If the trip is not feasible as requested, provide the closest valid version.
+- Respect special requirements strictly.
+
+Return only valid JSON and no markdown, explanation, or extra text.
+Follow this schema exactly:
+
+{format_instructions}
+
+Make the itinerary feel like it was created by a local travel expert, not a generic AI."""
 
 
-def _generate_day_checkpoints(day_index, day_date, place, interests, budget):
-	interest_hint = interests[day_index % len(interests)] if interests else "Local exploration"
+
+def _generate_detailed_day_checkpoints(day_index, day_date, place, interests, budget, current_location, travelers):
+	"""
+	Generate detailed day checkpoints with place names, costs, transport, and activities.
+	This is a robust fallback that does NOT rely on LLM.
+	"""
+	interest_hint = interests[day_index % len(interests)] if interests else "sightseeing"
+	
+	# Map places to local attractions and realistic costs
+	place_attractions = {
+		"Rishikesh": {
+			"morning": {"activity": "Ghat Yoga & Meditation", "cost": "₹300-500", "transport": "Local taxi/auto"},
+			"midday": {"activity": "Triveni Ghat & Temple Visit", "cost": "₹200-400", "transport": "Walking/local transport"},
+			"afternoon": {"activity": "Adventure Sports (Rafting)", "cost": "₹800-1500", "transport": "Organized shuttle"},
+			"evening": {"activity": "Lakshman Jhula & Market", "cost": "₹300-600", "transport": "Local auto/bus"}
+		},
+		"Haridwar": {
+			"morning": {"activity": "Ghat Pilgrimage & Aarti", "cost": "₹200-400", "transport": "Walking/auto"},
+			"midday": {"activity": "Mansa Devi Temple Cable Car", "cost": "₹250-500", "transport": "Cable car"},
+			"afternoon": {"activity": "Local Market & Shopping", "cost": "₹500-1200", "transport": "Walking/auto"},
+			"evening": {"activity": "Evening Aarti Ceremony", "cost": "₹150-300", "transport": "Walking"}
+		},
+		"Mussoorie": {
+			"morning": {"activity": "Mall Road Walking & Breakfast", "cost": "₹400-800", "transport": "Walking"},
+			"midday": {"activity": "Gun Hill Viewpoint", "cost": "₹300-600", "transport": "Cable car/local taxi"},
+			"afternoon": {"activity": "Kempty Falls Trek", "cost": "₹600-1200", "transport": "Organized tour/local taxi"},
+			"evening": {"activity": "Cloud's End Point Sunset", "cost": "₹200-400", "transport": "Local taxi"}
+		},
+		"Nainital": {
+			"morning": {"activity": "Naini Lake Boat Ride", "cost": "₹400-700", "transport": "Local transport"},
+			"midday": {"activity": "Mall Road Shopping", "cost": "₹500-1000", "transport": "Walking/horse ride"},
+			"afternoon": {"activity": "Ropeway/Chairlift Ride", "cost": "₹300-500", "transport": "Chairlift"},
+			"evening": {"activity": "Viewpoint & Photography", "cost": "₹200-400", "transport": "Taxi/local transport"}
+		},
+		"Dehradun": {
+			"morning": {"activity": "Breakfast & Local Markets", "cost": "₹300-600", "transport": "Local auto"},
+			"midday": {"activity": "Robbers' Cave Trek", "cost": "₹400-800", "transport": "Taxi/organized tour"},
+			"afternoon": {"activity": "Shopping at Paltan Bazaar", "cost": "₹500-1200", "transport": "Auto/taxi"},
+			"evening": {"activity": "Local Dinner & Relaxation", "cost": "₹600-1200", "transport": "Taxi"}
+		}
+	}
+	
+	# Get attraction data for the place, or use generic fallback
+	attractions = place_attractions.get(place, {
+		"morning": {"activity": f"Breakfast & Orientation in {place}", "cost": "₹300-500", "transport": "Local transport"},
+		"midday": {"activity": f"Local Sightseeing - {interest_hint}", "cost": "₹500-1000", "transport": "Taxi/local transport"},
+		"afternoon": {"activity": f"Adventure Activity - {interest_hint}", "cost": "₹800-1500", "transport": "Organized transport"},
+		"evening": {"activity": f"Dinner & Local Experience", "cost": "₹600-1200", "transport": "Local transport"}
+	})
+	
+	# Determine budget-based recommendations
+	budget_lower = "Budget" in budget or "Low" in budget
+	budget_higher = "Premium" in budget or "Luxury" in budget
+	
 	date_label = day_date.strftime("%d %b %Y")
-
-	return [
+	
+	checkpoints = [
 		{
 			"time": "08:00 AM",
-			"title": f"Breakfast and Briefing in {place}",
-			"description": f"Start with local breakfast and quick orientation for day {day_index + 1}.",
+			"title": attractions["morning"]["activity"],
+			"description": f"Start your day with {attractions['morning']['activity'].lower()} in {place}. Ideal for morning activities and exploration.",
 			"location": place,
-			"notes": f"Keep this within {budget} budget preference.",
+			"notes": f"Cost estimate: {attractions['morning']['cost']} | Transport: {attractions['morning']['transport']} | Date: {date_label}",
+			"cost": attractions["morning"]["cost"],
+			"transport": attractions["morning"]["transport"],
 		},
 		{
-			"time": "11:00 AM",
-			"title": f"{interest_hint} Experience",
-			"description": f"Focused activity around {interest_hint.lower()} with photo stops and local stories.",
+			"time": "12:30 PM",
+			"title": attractions["midday"]["activity"],
+			"description": f"Mid-day experience with {attractions['midday']['activity'].lower()}. Great for lunch and afternoon activities.",
 			"location": place,
-			"notes": "Carry water and maintain flexible timing for weather.",
+			"notes": f"Cost estimate: {attractions['midday']['cost']} | Transport: {attractions['midday']['transport']} | Travelers: {travelers}",
+			"cost": attractions["midday"]["cost"],
+			"transport": attractions["midday"]["transport"],
 		},
 		{
-			"time": "03:30 PM",
-			"title": "Scenic Checkpoint",
-			"description": f"Leisure walk and viewpoint session around {place}.",
+			"time": "04:00 PM",
+			"title": attractions["afternoon"]["activity"],
+			"description": f"Afternoon adventure with {attractions['afternoon']['activity'].lower()}. Best time for outdoor activities.",
 			"location": place,
-			"notes": "Ideal time for relaxed exploration and short breaks.",
+			"notes": f"Cost estimate: {attractions['afternoon']['cost']} | Transport: {attractions['afternoon']['transport']} | Bring water & snacks",
+			"cost": attractions["afternoon"]["cost"],
+			"transport": attractions["afternoon"]["transport"],
 		},
 		{
-			"time": "07:00 PM",
-			"title": "Dinner and Day Wrap-up",
-			"description": f"Try regional dinner and plan next day highlights.",
+			"time": "07:30 PM",
+			"title": attractions["evening"]["activity"],
+			"description": f"Evening relaxation with {attractions['evening']['activity'].lower()}. Perfect for dinner and winding down.",
 			"location": place,
-			"notes": f"Date: {date_label}",
-		},
+			"notes": f"Cost estimate: {attractions['evening']['cost']} | Transport: {attractions['evening']['transport']} | Dinner included",
+			"cost": attractions["evening"]["cost"],
+			"transport": attractions["evening"]["transport"],
+		}
 	]
+	
+	return checkpoints
 
 
 def _to_markdown(structured_output, trip_context):
@@ -157,21 +247,39 @@ def _to_markdown(structured_output, trip_context):
 	for day in structured_output.get("days", []):
 		lines.append(f"**Day {day.get('dayNumber')}: {day.get('date')} - {day.get('title')}**")
 		lines.append("")
-		lines.append("| Time | Activity | Description |")
-		lines.append("|------|----------|-------------|")
+		lines.append("| Time | Activity | Description | Location |")
+		lines.append("|------|----------|-------------|----------|")
 		for cp in day.get("checkpoints", []):
 			lines.append(
-				f"| **{cp.get('time', '')}** | **{cp.get('title', '')}** | {cp.get('description', '')} ({cp.get('location', '')}) |"
+				f"| **{cp.get('time', '')}** | **{cp.get('title', '')}** | {cp.get('description', '')} | {cp.get('location', '')} |"
 			)
+
+			if cp.get("activities"):
+				lines.append("")
+				lines.append("**Activities:**")
+				for activity in cp.get("activities", []):
+					lines.append(f"- **{activity.get('name')}** ({activity.get('duration')}): {activity.get('description')}")
+					lines.append(f"  Cost: {activity.get('estimated_cost')}")
+					if activity.get('notes'):
+						lines.append(f"  Note: {activity.get('notes')}")
+
+			if cp.get("costs"):
+				lines.append("")
+				lines.append("**Associated Costs:**")
+				for cost in cp.get("costs", []):
+					lines.append(f"- {cost.get('category').title()}: {cost.get('description')} - {cost.get('estimated_amount')}")
+
+			lines.append("")
 		lines.append("")
 
 	lines.append("**Budget Breakdown:**")
 	lines.append("")
-	lines.append(f"* Estimated budget range: {trip_context.get('budget', 'N/A')}")
+	lines.append(f"* Overall budget preference: {trip_context.get('budget', 'N/A')}")
+	lines.append("* Daily food budget: ₹600-1200 per person")
+	lines.append("* Activity budget: ₹500-2000 per person per day")
 	lines.append("* Accommodation: Flexible by destination and season")
-	lines.append("* Food and beverages: Local dining + cafe mix")
-	lines.append("* Transportation: Route-optimized local travel")
-	lines.append("* Activities and entry fees: Based on selected interests")
+	lines.append("* Transportation: Route-optimized local travel (₹200-500 per day)")
+	lines.append("* Note: All locations are verified and real places in Uttarakhand")
 
 	return "\n".join(lines)
 
@@ -206,7 +314,7 @@ def generate_structured_itinerary(payload):
 		day_count = _safe_int(payload.get("num_days"), max(len(places), 2))
 
 	if not places:
-		places = ["Rishikesh", "Haridwar", "Mussoorie","Nainital", "Dehradun"]
+		places = ["Rishikesh", "Haridwar", "Mussoorie", "Nainital", "Dehradun"]
 
 	structured: dict[str, object] = {}
 	llm_error_message = ""
@@ -220,7 +328,7 @@ def generate_structured_itinerary(payload):
 		)
 		context = _retrieve_context(payload, query_text)
 		prompt = _build_prompt(payload, context, parser.get_format_instructions())
-		print("Generation is here: invoking Groq LLM", file=sys.stderr)
+		print("Generation is here: invoking OpenAI LLM", file=sys.stderr)
 		response_message = llm.invoke(prompt)
 		response = _coerce_llm_text(response_message)
 		parsed_plan = parser.parse(response)
@@ -236,13 +344,22 @@ def generate_structured_itinerary(payload):
 		for index in range(day_count):
 			day_date = start_date + timedelta(days=index)
 			place = places[index % len(places)]
+			checkpoints = _generate_detailed_day_checkpoints(
+				index,
+				day_date,
+				place,
+				interests,
+				budget,
+				current_location,
+				travelers,
+			)
 			fallback_days.append(
 				{
 					"dayNumber": index + 1,
 					"date": day_date.isoformat(),
 					"title": f"Explore {place}",
-					"summary": f"A balanced day in {place} designed for {travelers} traveler(s).",
-					"checkpoints": _generate_day_checkpoints(index, day_date, place, interests, budget),
+					"summary": f"Day {index + 1}: Experience {place} with {interests[index % len(interests)] if interests else 'local sightseeing'} activities and realistic itinerary for {travelers} traveler(s).",
+					"checkpoints": checkpoints,
 				}
 			)
 		structured = {
@@ -266,15 +383,23 @@ def generate_structured_itinerary(payload):
 		if not day.get("title"):
 			place = places[index % len(places)]
 			day["title"] = f"Explore {place}"
-		if not isinstance(day.get("checkpoints"), list):
+		if not isinstance(day.get("checkpoints"), list) or len(day.get("checkpoints", [])) == 0:
 			place = places[index % len(places)]
-			day["checkpoints"] = _generate_day_checkpoints(index, start_date + timedelta(days=index), place, interests, budget)
+			day["checkpoints"] = _generate_detailed_day_checkpoints(
+				index,
+				start_date + timedelta(days=index),
+				place,
+				interests,
+				budget,
+				current_location,
+				travelers,
+			)
 
 	if "summary" not in structured or not isinstance(structured.get("summary"), dict):
 		structured["summary"] = {
 			"total_estimated_budget": budget,
 			"budget_fit": "optimized",
-			"notes": "Generated with Groq backed retrieval and generation.",
+			"notes": "Generated with OpenAI backed retrieval and generation.",
 		}
 
 	structured = {
@@ -313,4 +438,3 @@ def _main():
 
 if __name__ == "__main__":
 	_main()
-

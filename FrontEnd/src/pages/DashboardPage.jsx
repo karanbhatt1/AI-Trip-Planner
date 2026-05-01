@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { ApiError } from "../services/apiClient";
 import { apiRequest } from "../services/apiClient";
+import ItineraryDisplay from "../components/ItineraryDisplay";
 
 function getInitials(name, email) {
   const base = name || email || "U";
@@ -19,6 +20,7 @@ export default function DashboardPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
   const [recentTrips, setRecentTrips] = useState([]);
+  const [expandedTripId, setExpandedTripId] = useState("");
 
   useEffect(() => {
     const loadProfile = async () => {
@@ -163,23 +165,55 @@ export default function DashboardPage() {
             </div>
 
             {recentTrips.length > 0 ? (
-              <div className="grid gap-4 md:grid-cols-3">
-                {recentTrips.map((trip) => (
-                  <Link
-                    key={trip._id}
-                    to="/dashboard/itineraries"
-                    className="rounded-xl border border-slate-700 bg-slate-950/60 p-4 hover:border-teal-500 transition"
-                  >
-                    <p className="text-xs text-teal-300 mb-2">{trip.budget || "Trip"}</p>
-                    <h3 className="font-semibold text-white">{trip.destinations?.[0] || "Saved itinerary"}</h3>
-                    <p className="text-xs text-slate-400 mt-2">
-                      {trip.startDate ? new Date(trip.startDate).toLocaleDateString() : "N/A"} → {trip.endDate ? new Date(trip.endDate).toLocaleDateString() : "N/A"}
-                    </p>
-                    <p className="text-xs text-slate-500 mt-2 max-h-16 overflow-hidden">
-                      {trip.itinerary || "Open to edit structured day cards and checkpoints."}
-                    </p>
-                  </Link>
-                ))}
+              <div className="space-y-4">
+                {recentTrips.map((trip) => {
+                  const destinationName = trip.destinations?.[0] || "Saved itinerary";
+                  const isExpanded = expandedTripId === trip._id;
+
+                  return (
+                    <article
+                      key={trip._id}
+                      className="rounded-xl border border-slate-700 bg-slate-950/60 p-4 hover:border-teal-500 transition"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setExpandedTripId(isExpanded ? "" : trip._id)}
+                        className="w-full text-left"
+                      >
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <p className="text-xs text-teal-300 mb-2">{trip.budget || "Trip"}</p>
+                            <h3 className="font-semibold text-white text-lg">{destinationName}</h3>
+                            <p className="text-xs text-slate-400 mt-2">
+                              {trip.startDate ? new Date(trip.startDate).toLocaleDateString() : "N/A"} → {trip.endDate ? new Date(trip.endDate).toLocaleDateString() : "N/A"}
+                            </p>
+                          </div>
+                          <span className="text-xs px-3 py-1 rounded-full border border-slate-600 text-slate-300">
+                            {isExpanded ? "Collapse" : "Expand"}
+                          </span>
+                        </div>
+                      </button>
+
+                      {isExpanded ? (
+                        <div className="mt-4 border-t border-slate-700 pt-4">
+                          <ItineraryDisplay
+                            itineraryText={trip.itinerary}
+                            itineraryStructured={trip.itineraryStructured}
+                            className="mt-0"
+                            readOnly
+                            initialExpandedDays={new Set()}
+                          />
+                          <Link
+                            to="/dashboard/itineraries"
+                            className="mt-4 inline-flex px-4 py-2 rounded-lg border border-teal-500 text-teal-300 hover:bg-teal-500/10 transition"
+                          >
+                            Open itinerary
+                          </Link>
+                        </div>
+                      ) : null}
+                    </article>
+                  );
+                })}
               </div>
             ) : (
               <p className="text-sm text-slate-400">No saved itineraries yet.</p>

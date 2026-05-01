@@ -1,4 +1,4 @@
-{
+exit{
   "_type": "prompt",
   "input_variables": [
     "start_date",

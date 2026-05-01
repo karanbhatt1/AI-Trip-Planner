@@ -1,283 +1,225 @@
-// No longer need geolib - using Haversine formula instead
+const MAPBOX_TOKEN =
+  process.env.MAPBOX_TOKEN ||
+  process.env.MAPBOX_ACCESS_TOKEN ||
+  process.env.VITE_MAPBOX_TOKEN ||
+  process.env.VITE_MAPBOX_API_KEY;
 
-// Sample places database (in a real app, this would come from a database or external API)
-const SAMPLE_PLACES = [
-  {
-    name: 'Delhi',
-    lat: 28.6139,
-    lng: 77.2090,
-    description: 'Capital city of India',
-    category: 'city',
-    popularity: 10
-  },
-  {
-    name: 'Agra',
-    lat: 27.1767,
-    lng: 78.0081,
-    description: 'Home to the Taj Mahal',
-    category: 'historical',
-    popularity: 9
-  },
-  {
-    name: 'Jaipur',
-    lat: 26.9124,
-    lng: 75.7873,
-    description: 'Pink City of India',
-    category: 'historical',
-    popularity: 8
-  },
-  {
-    name: 'Murthal',
-    lat: 29.0167,
-    lng: 77.0667,
-    description: 'Famous for parathas and dhabas',
-    category: 'food',
-    popularity: 6
-  },
-  {
-    name: 'Panipat',
-    lat: 29.3909,
-    lng: 76.9635,
-    description: 'Historical city with Mughal heritage',
-    category: 'historical',
-    popularity: 5
-  },
-  {
-    name: 'Nainital',
-    lat: 29.3919,
-    lng: 79.4542,
-    description: 'Lake city in Uttarakhand',
-    category: 'nature',
-    popularity: 7
-  },
-  {
-    name: 'Rishikesh',
-    lat: 30.0869,
-    lng: 78.2676,
-    description: 'Adventure capital of India',
-    category: 'adventure',
-    popularity: 8
-  }
-];
-
-// Simple TSP-like optimization using nearest neighbor algorithm
-function optimizeRoute(points) {
-  if (points.length <= 2) return points;
-
-  const optimized = [points[0]]; // Start with first point
-  const remaining = [...points.slice(1)];
-
-  while (remaining.length > 0) {
-    const lastPoint = optimized[optimized.length - 1];
-    let nearestIndex = 0;
-    let minDistance = calculateDistance(lastPoint, remaining[0]);
-
-    // Find nearest remaining point
-    for (let i = 1; i < remaining.length; i++) {
-      const distance = calculateDistance(lastPoint, remaining[i]);
-      if (distance < minDistance) {
-        minDistance = distance;
-        nearestIndex = i;
-      }
-    }
-
-    // Add nearest point to optimized route
-    optimized.push(remaining[nearestIndex]);
-    remaining.splice(nearestIndex, 1);
-  }
-
-  return optimized;
+function isValidCoordinatePoint(point) {
+  return Number.isFinite(point?.lat) && Number.isFinite(point?.lng);
 }
 
-// Helper function to calculate distance between two points
-function calculateDistance(coord1, coord2) {
-  const R = 6371; // Earth's radius in km
-  const dLat = (coord2.lat - coord1.lat) * Math.PI / 180;
-  const dLng = (coord2.lng - coord1.lng) * Math.PI / 180;
-  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(coord1.lat * Math.PI / 180) * Math.cos(coord2.lat * Math.PI / 180) *
-    Math.sin(dLng / 2) * Math.sin(dLng / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c; // Distance in km
-}
-
-// Calculate route segments with distances and times
-function calculateRouteSegments(checkpoints) {
-  const segments = [];
-  let totalDistance = 0;
-
-  for (let i = 0; i < checkpoints.length - 1; i++) {
-    const from = checkpoints[i];
-    const to = checkpoints[i + 1];
-
-    // Calculate distance using Haversine formula
-    const distance = calculateDistance(from, to);
-    totalDistance += distance;
-
-    // Estimate travel time (assuming average speed of 60 km/h for highways)
-    const timeHours = distance / 60;
-    const timeString = timeHours < 1
-      ? `${Math.round(timeHours * 60)} min`
-      : `${timeHours.toFixed(1)} hrs`;
-
-    segments.push({
-      from: from.name,
-      to: to.name,
-      distance: distance.toFixed(1),
-      time: timeString,
-      distanceRaw: distance
-    });
+function normalizeInputPoint(point, fallbackName = '') {
+  if (!point) {
+    return null;
   }
 
-  return { segments, totalDistance: totalDistance.toFixed(1) };
+  if (typeof point === 'string') {
+    const trimmed = point.trim();
+    return trimmed ? { name: trimmed } : null;
+  }
+
+  if (isValidCoordinatePoint(point)) {
+    return {
+      name: point.name || point.location || fallbackName || 'Location',
+      lat: point.lat,
+      lng: point.lng,
+    };
+  }
+
+  const name = point.name || point.location || point.title || fallbackName;
+  return name ? { name: String(name).trim() } : null;
 }
 
-// Generate AI-optimized checkpoints between source and destination
-function generateAICheckpoints(source, destination, preferences = {}) {
-  const { budget = 'medium', interests = [], maxStops = 5 } = preferences;
+function getMapboxQuery(point) {
+  if (!point) {
+    return '';
+  }
 
-  // Find relevant places based on interests and route
-  let relevantPlaces = SAMPLE_PLACES.filter(place => {
-    // Filter by interests if specified
-    if (interests.length > 0) {
-      return interests.some(interest =>
-        place.category.toLowerCase().includes(interest.toLowerCase()) ||
-        place.description.toLowerCase().includes(interest.toLowerCase())
-      );
-    }
-    return true;
-  });
+  if (typeof point === 'string') {
+    return point.trim();
+  }
 
-  // Sort by popularity and proximity to route
-  relevantPlaces.sort((a, b) => {
-    const aDistance = Math.min(
-      calculateDistance(a, source),
-      calculateDistance(a, destination)
-    );
+  return String(point.name || point.location || point.title || '').trim();
+}
 
-    const bDistance = Math.min(
-      calculateDistance(b, source),
-      calculateDistance(b, destination)
-    );
+async function geocodePoint(point, index = 0) {
+  const normalized = normalizeInputPoint(point, `Stop ${index + 1}`);
+  if (!normalized) {
+    return null;
+  }
 
-    // Prefer closer places, then more popular ones
-    return (aDistance * 0.7 + (10 - a.popularity) * 1000) -
-           (bDistance * 0.7 + (10 - b.popularity) * 1000);
-  });
+  if (isValidCoordinatePoint(normalized)) {
+    return normalized;
+  }
 
-  // Limit number of checkpoints
-  const checkpoints = relevantPlaces.slice(0, Math.min(maxStops, relevantPlaces.length));
+  const query = getMapboxQuery(normalized);
+  if (!query) {
+    return null;
+  }
 
-  return checkpoints.map((place, index) => ({
-    ...place,
-    why: generateWhyText(place, index + 1, preferences)
+  if (!MAPBOX_TOKEN) {
+    throw new Error('MAPBOX_TOKEN is not configured on the backend.');
+  }
+
+  const response = await fetch(
+    `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?country=IN&limit=1&access_token=${MAPBOX_TOKEN}`
+  );
+
+  if (!response.ok) {
+    throw new Error(`Failed to geocode location: ${query}`);
+  }
+
+  const data = await response.json();
+  const feature = data?.features?.[0];
+  if (!feature?.geometry?.coordinates || feature.geometry.coordinates.length < 2) {
+    return null;
+  }
+
+  return {
+    name: feature.place_name || query,
+    lat: feature.geometry.coordinates[1],
+    lng: feature.geometry.coordinates[0],
+  };
+}
+
+function formatDuration(durationSeconds) {
+  const totalMinutes = Math.round(durationSeconds / 60);
+  if (totalMinutes < 60) {
+    return `${totalMinutes} min`;
+  }
+
+  const hours = totalMinutes / 60;
+  return `${hours.toFixed(1)} hrs`;
+}
+
+function buildRouteSummary(route, orderedPoints) {
+  const legs = Array.isArray(route?.legs) ? route.legs : [];
+  const segments = legs.map((leg, index) => ({
+    from: orderedPoints[index]?.name || `Stop ${index + 1}`,
+    to: orderedPoints[index + 1]?.name || `Stop ${index + 2}`,
+    distance: (leg.distance / 1000).toFixed(1),
+    time: formatDuration(leg.duration),
+    distanceRaw: leg.distance / 1000,
+  }));
+
+  return {
+    totalDistance: (route.distance / 1000).toFixed(1),
+    totalTime: formatDuration(route.duration),
+    segments,
+    optimization: 'Mapbox optimized route',
+  };
+}
+
+function buildCheckpointList(orderedPoints, routeWaypoints = []) {
+  return orderedPoints.map((point, index) => ({
+    name: point.name,
+    lat: point.lat,
+    lng: point.lng,
+    description: index === 0
+      ? 'Starting point of your route'
+      : index === orderedPoints.length - 1
+        ? 'Destination point of your route'
+        : `Verified checkpoint ${index + 1}`,
+    why: routeWaypoints[index]?.name ? `Verified via Mapbox: ${routeWaypoints[index].name}` : 'Verified via Mapbox',
   }));
 }
 
-function generateWhyText(place, position, preferences) {
-  const reasons = [
-    `Popular ${place.category} destination along your route`,
-    `Highly rated spot for ${preferences.interests?.join(' and ') || 'travelers'}`,
-    `Perfect stopover point ${position} on your journey`,
-    `Recommended by fellow travelers for its ${place.category} experience`,
-    `Strategic location to break up your long drive`
-  ];
+async function fetchMapboxJson(url, failureLabel) {
+  const response = await fetch(url);
+  const bodyText = await response.text();
 
-  return reasons[Math.floor(Math.random() * reasons.length)];
-}
-
-// Main route optimization function
-export async function getOptimizedRoute(source, destination, waypoints = [], preferences = {}) {
-  try {
-    // Convert string inputs to coordinate objects if needed
-    const sourcePoint = typeof source === 'string'
-      ? findPlaceByName(source) || { name: source, lat: 28.6139, lng: 77.2090 }
-      : source;
-
-    const destPoint = typeof destination === 'string'
-      ? findPlaceByName(destination) || { name: destination, lat: 27.1767, lng: 78.0081 }
-      : destination;
-
-    // Convert waypoints
-    const waypointPoints = waypoints.map(wp =>
-      typeof wp === 'string' ? findPlaceByName(wp) || createWaypointFromString(wp) : wp
-    );
-
-    // Generate AI checkpoints if no waypoints provided
-    let allPoints = [sourcePoint];
-    if (waypointPoints.length === 0) {
-      const aiCheckpoints = generateAICheckpoints(sourcePoint, destPoint, preferences);
-      allPoints = allPoints.concat(aiCheckpoints);
-    } else {
-      allPoints = allPoints.concat(waypointPoints);
+  if (!response.ok) {
+    let message = `${failureLabel} failed.`;
+    try {
+      const parsed = JSON.parse(bodyText);
+      message = parsed?.message || parsed?.error || message;
+    } catch {
+      if (bodyText) {
+        message = bodyText;
+      }
     }
-    allPoints.push(destPoint);
 
-    // Remove duplicates
-    allPoints = allPoints.filter((point, index, self) =>
-      index === self.findIndex(p => p.name === point.name)
-    );
-
-    // Optimize route order using TSP-like algorithm
-    const optimizedPoints = optimizeRoute(allPoints);
-
-    // Calculate route segments
-    const { segments, totalDistance } = calculateRouteSegments(optimizedPoints);
-
-    // Calculate total time
-    const totalTimeHours = segments.reduce((total, segment) => {
-      const timeMatch = segment.time.match(/(\d+(?:\.\d+)?)\s*(min|hrs?)/);
-      if (timeMatch) {
-        const value = parseFloat(timeMatch[1]);
-        const unit = timeMatch[2];
-        return total + (unit.startsWith('hr') ? value : value / 60);
-      }
-      return total;
-    }, 0);
-
-    const totalTime = totalTimeHours < 1
-      ? `${Math.round(totalTimeHours * 60)} min`
-      : `${totalTimeHours.toFixed(1)} hrs`;
-
-    return {
-      checkpoints: optimizedPoints.map((point, index) => ({
-        name: point.name,
-        lat: point.lat,
-        lng: point.lng,
-        description: point.description || `Stop ${index + 1} on your route`,
-        why: point.why || `Optimized stop ${index + 1}`
-      })),
-      routeSummary: {
-        totalDistance,
-        totalTime,
-        segments,
-        optimization: 'AI-optimized using nearest neighbor algorithm'
-      }
-    };
-
-  } catch (error) {
-    console.error('Error in getOptimizedRoute:', error);
-    throw new Error('Failed to optimize route');
+    const error = new Error(message);
+    error.status = response.status;
+    throw error;
   }
+
+  return bodyText ? JSON.parse(bodyText) : {};
 }
 
-function findPlaceByName(name) {
-  return SAMPLE_PLACES.find(place =>
-    place.name.toLowerCase() === name.toLowerCase()
-  );
-}
+export async function getOptimizedRoute(source, destination, waypoints = [], preferences = {}) {
+  if (!MAPBOX_TOKEN) {
+    throw new Error('MAPBOX_TOKEN is not configured on the backend.');
+  }
 
-function createWaypointFromString(name) {
-  // Create a basic waypoint with random coordinates near Delhi
-  const baseLat = 28.6139;
-  const baseLng = 77.2090;
-  const variance = 0.5;
+  const sourcePoint = await geocodePoint(source, 0);
+  const destinationPoint = await geocodePoint(destination, 1);
+
+  if (!sourcePoint || !destinationPoint) {
+    throw new Error('Source and destination must be valid, verifiable locations.');
+  }
+
+  const verifiedWaypoints = [];
+  for (let index = 0; index < waypoints.length; index += 1) {
+    const verified = await geocodePoint(waypoints[index], index + 2);
+    if (verified) {
+      verifiedWaypoints.push(verified);
+    }
+  }
+
+  const orderedPoints = [sourcePoint, ...verifiedWaypoints, destinationPoint];
+  if (orderedPoints.length < 2) {
+    throw new Error('Need at least a source and destination to create a route.');
+  }
+
+  const coordinates = orderedPoints.map((point) => `${point.lng},${point.lat}`).join(';');
+  const mapboxUrl =
+    `https://api.mapbox.com/optimized-trips/v1/mapbox/driving/${coordinates}` +
+    `?source=first&destination=last&roundtrip=false&geometries=geojson&overview=full&steps=true&access_token=${MAPBOX_TOKEN}`;
+
+  let data;
+  let trip;
+
+  try {
+    data = await fetchMapboxJson(mapboxUrl, 'Mapbox route optimization');
+    trip = data?.trips?.[0];
+    if (!trip) {
+      throw new Error('Mapbox did not return a valid optimized route.');
+    }
+  } catch (optimizationError) {
+    const directionsUrl =
+      `https://api.mapbox.com/directions/v5/mapbox/driving/${coordinates}` +
+      `?geometries=geojson&overview=full&steps=true&access_token=${MAPBOX_TOKEN}`;
+
+    try {
+      data = await fetchMapboxJson(directionsUrl, 'Mapbox directions fallback');
+      trip = data?.routes?.[0];
+      if (!trip) {
+        throw new Error('Mapbox did not return a valid route.');
+      }
+    } catch (fallbackError) {
+      throw new Error(
+        `Mapbox route optimization failed: ${optimizationError.message}. Fallback directions also failed: ${fallbackError.message}`
+      );
+    }
+  }
+
+  const waypointOrder = Array.isArray(data?.waypoints)
+    ? [...data.waypoints].sort((left, right) => (left.waypoint_index ?? 0) - (right.waypoint_index ?? 0))
+    : [];
+
+  const routePointsByIndex = waypointOrder.length > 0
+    ? waypointOrder.map((waypoint, index) => ({
+        name: waypoint?.name || orderedPoints[index]?.name || `Stop ${index + 1}`,
+        lat: waypoint?.location?.[1] ?? orderedPoints[index]?.lat,
+        lng: waypoint?.location?.[0] ?? orderedPoints[index]?.lng,
+      }))
+    : orderedPoints;
 
   return {
-    name,
-    lat: baseLat + (Math.random() - 0.5) * variance,
-    lng: baseLng + (Math.random() - 0.5) * variance,
-    description: `Waypoint: ${name}`,
-    why: 'Custom waypoint added to route'
+    checkpoints: buildCheckpointList(routePointsByIndex, routePointsByIndex),
+    routeSummary: buildRouteSummary(trip, routePointsByIndex),
+    routeGeometry: trip.geometry,
+    preferences,
   };
 }

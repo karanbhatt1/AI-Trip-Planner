@@ -3,6 +3,8 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 import rateLimit from 'express-rate-limit';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import authRoutes from './Routes/auth.js';
 import userRoutes from './Routes/user.routes.js';
 import tripRoutes from './Routes/trip.routes.js';
@@ -12,6 +14,10 @@ import User from './models/user.model.js';
 
 const app = express();
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.resolve(__dirname, '../FrontEnd/.env') });
 
 const port = process.env.PORT || 5000;
 

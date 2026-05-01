@@ -381,6 +381,15 @@ export default function SavedItinerariesPage() {
                   ) : null}
                 </div>
 
+                <ItineraryDisplay
+                  itineraryText={trip.itinerary}
+                  itineraryStructured={trip.itineraryStructured}
+                  initialExpandedDays={new Set()}
+                  className="mt-4"
+                  readOnly
+                  currentLocation={trip?.startingPosition}
+                />
+
                 <button
                   type="button"
                   onClick={() => openTrip(trip)}
@@ -553,11 +562,21 @@ export default function SavedItinerariesPage() {
             </div>
 
             {selectedView === 'summary' ? (
-              <div className="grid gap-3 md:grid-cols-2 text-sm text-slate-300 mb-5">
-                <p><span className="text-slate-500">Start:</span> {selectedTrip.startDate ? new Date(selectedTrip.startDate).toLocaleDateString() : 'N/A'}</p>
-                <p><span className="text-slate-500">End:</span> {selectedTrip.endDate ? new Date(selectedTrip.endDate).toLocaleDateString() : 'N/A'}</p>
-                <p><span className="text-slate-500">Travelers:</span> {selectedTrip.travelers ?? 'N/A'}</p>
-                <p><span className="text-slate-500">Created:</span> {selectedTrip.createdAt ? new Date(selectedTrip.createdAt).toLocaleString() : 'N/A'}</p>
+              <div className="space-y-4 mb-5">
+                <div className="grid gap-3 md:grid-cols-2 text-sm text-slate-300">
+                  <p><span className="text-slate-500">Start:</span> {selectedTrip.startDate ? new Date(selectedTrip.startDate).toLocaleDateString() : 'N/A'}</p>
+                  <p><span className="text-slate-500">End:</span> {selectedTrip.endDate ? new Date(selectedTrip.endDate).toLocaleDateString() : 'N/A'}</p>
+                  <p><span className="text-slate-500">Travelers:</span> {selectedTrip.travelers ?? 'N/A'}</p>
+                  <p><span className="text-slate-500">Created:</span> {selectedTrip.createdAt ? new Date(selectedTrip.createdAt).toLocaleString() : 'N/A'}</p>
+                </div>
+
+                <ItineraryDisplay
+                  itineraryText={editableSavedItinerary}
+                  itineraryStructured={editableStructuredItinerary}
+                  className="mt-2"
+                  readOnly
+                  currentLocation={selectedTrip?.startingPosition}
+                />
               </div>
             ) : null}
 

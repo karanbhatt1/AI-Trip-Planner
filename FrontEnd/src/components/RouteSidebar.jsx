@@ -7,10 +7,24 @@ const RouteSidebar = ({
   onCheckpointClick,
   isLoading,
   startingLocation,
+  fullWidth = false,
 }) => {
+  const createMapsUrl = (checkpoint) => {
+    if (!checkpoint) return '';
+
+    if (Number.isFinite(checkpoint.lat) && Number.isFinite(checkpoint.lng)) {
+      return `https://www.google.com/maps/search/?api=1&query=${checkpoint.lat},${checkpoint.lng}`;
+    }
+
+    const query = checkpoint.location || checkpoint.name || '';
+    if (!query) return '';
+
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+  };
+
   if (isLoading) {
     return (
-      <div className="w-full max-w-md bg-slate-800 rounded-xl p-6 border border-slate-700">
+      <div className={`w-full ${fullWidth ? '' : 'max-w-md'} bg-slate-800 rounded-xl p-6 border border-slate-700`}>
         <div className="animate-pulse">
           <div className="h-6 bg-slate-700 rounded mb-4"></div>
           <div className="space-y-3">
@@ -25,7 +39,7 @@ const RouteSidebar = ({
 
   if (!checkpoints || checkpoints.length === 0) {
     return (
-      <div className="w-full max-w-md bg-slate-800 rounded-xl p-6 border border-slate-700">
+      <div className={`w-full ${fullWidth ? '' : 'max-w-md'} bg-slate-800 rounded-xl p-6 border border-slate-700`}>
         <div className="text-center text-slate-400">
           <Navigation className="w-12 h-12 mx-auto mb-3 opacity-50" />
           <p>No route data available</p>
@@ -35,7 +49,7 @@ const RouteSidebar = ({
   }
 
   return (
-    <div className="w-full max-w-md bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+    <div className={`w-full ${fullWidth ? '' : 'max-w-md'} bg-slate-800 rounded-xl border border-slate-700 overflow-hidden`}>
       {/* Header */}
       <div className="p-6 border-b border-slate-700">
         <div className="flex items-center gap-3 mb-2">
@@ -99,6 +113,18 @@ const RouteSidebar = ({
                     {checkpoint.description}
                   </p>
                 )}
+
+                {createMapsUrl(checkpoint) ? (
+                  <a
+                    href={createMapsUrl(checkpoint)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-cyan-300 hover:text-cyan-200"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    Open location in Maps
+                  </a>
+                ) : null}
 
                 {/* Travel Time to Next Stop */}
                 {index < checkpoints.length - 1 && routeSummary?.segments?.[index] && (

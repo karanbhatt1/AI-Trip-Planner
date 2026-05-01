@@ -1,4 +1,3 @@
-// src/components/Navbar.jsx
 import { Mountain } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
@@ -18,43 +17,11 @@ function getInitials(name, email) {
 }
 
 
-
-// function SigninModal({ onClose }) {
-//   return (
-//     <div className="
-//   fixed inset-0 z-[9999]
-//   bg-black/40 backdrop-blur-md
-//   flex items-center justify-center
-//   transition-opacity duration-300
-// "
-// >
-//     <div className="
-//       bg-slate-700 rounded-2xl
-//       p-6 w-full max-w-md
-//       shadow-2xl
-//       relative
-//     ">
-//         <button onClick={onClose} className=" bg-green-600/65 w-auto rounded-3xl absolute top-3 right-4 text-xl p-1">
-//           ✕
-//         </button>
-//         <Signin />
-//       </div>
-//     </div>
-//   );
-// }
-
 export default function Navbar() {
   const [showAuth, setShowAuth] = useState(false);
   const [activeSection, setActiveSection] = useState("home");
   const { isAuthenticated, isInitializing, logout, user } = useAuth();
   const navigate = useNavigate();
-  // const [openSignin, setOpenSignin] = useState(false);
-
-//   useEffect(() => {
-//   document.body.style.overflow = openSignin ? "hidden" : "auto";
-// }, [openSignin]);
-
-
   
   const scrollToSection = (e, id) => {
     e.preventDefault(); 

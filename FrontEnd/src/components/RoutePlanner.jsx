@@ -4,122 +4,145 @@ import RouteMap from './RouteMap';
 import RouteSidebar from './RouteSidebar';
 import { apiRequest } from '../services/apiClient';
 
-const RoutePlanner = ({ tripData, startingLocation = null, compact = false }) => {
+const RoutePlanner = ({ tripData, startingLocation = null, compact = false, stackedLayout = false, mapHeight }) => {
   const [checkpoints, setCheckpoints] = useState([]);
   const [routeSummary, setRouteSummary] = useState(null);
   const [selectedCheckpoint, setSelectedCheckpoint] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Generate route when trip data changes
   useEffect(() => {
     if (tripData) {
       generateRoute(tripData);
     }
   }, [tripData]);
 
+  const isMeaningfulLabel = (value) => {
+    const label = String(value || '').trim();
+    if (!label) return false;
+
+    const lower = label.toLowerCase();
+    const invalidLabels = [
+      'day',
+      'morning',
+      'afternoon',
+      'evening',
+      'night',
+      'breakfast',
+      'lunch',
+      'dinner',
+      'arrival',
+      'departure',
+      'travel',
+      'rest',
+    ];
+
+    return !invalidLabels.some((token) => lower === token || lower.startsWith(`${token} `) || lower.includes(` ${token}`));
+  };
+
+  const normalizeCheckpoint = (checkpoint) => {
+    if (!checkpoint) return null;
+
+    const name = checkpoint.location || checkpoint.title || checkpoint.name || checkpoint.description || '';
+    const trimmedName = String(name).trim();
+
+    if (!trimmedName || !isMeaningfulLabel(trimmedName)) {
+      return null;
+    }
+
+    const lat = Number(checkpoint.lat);
+    const lng = Number(checkpoint.lng);
+    const hasCoordinates = Number.isFinite(lat) && Number.isFinite(lng);
+
+    return {
+      name: trimmedName,
+      lat: hasCoordinates ? lat : undefined,
+      lng: hasCoordinates ? lng : undefined,
+      description: checkpoint.description || checkpoint.notes || '',
+      why: checkpoint.why || 'Verified route checkpoint',
+    };
+  };
+
+  const flattenStructuredCheckpoints = (days = []) => {
+    const checkpointsList = [];
+
+    for (const day of days) {
+      const dayCheckpoints = Array.isArray(day?.checkpoints) ? day.checkpoints : [];
+      for (const checkpoint of dayCheckpoints) {
+        const normalized = normalizeCheckpoint(checkpoint);
+        if (normalized) {
+          checkpointsList.push(normalized);
+        }
+      }
+    }
+
+    return checkpointsList;
+  };
+
+  const extractPlacesFromTrip = (data) => {
+    const directCheckpoints = Array.isArray(data?.checkpoints)
+      ? data.checkpoints.map(normalizeCheckpoint).filter(Boolean)
+      : [];
+
+    if (directCheckpoints.length > 0) {
+      return directCheckpoints;
+    }
+
+    const structuredCheckpoints = Array.isArray(data?.itineraryStructured?.days)
+      ? flattenStructuredCheckpoints(data.itineraryStructured.days)
+      : [];
+
+    if (structuredCheckpoints.length > 0) {
+      return structuredCheckpoints;
+    }
+
+    if (Array.isArray(data?.destinations)) {
+      return data.destinations
+        .map((destination) => normalizeCheckpoint({ title: destination, location: destination, description: `Visit ${destination}` }))
+        .filter(Boolean);
+    }
+
+    return [];
+  };
+
   const generateRoute = async (data) => {
     setIsLoading(true);
     setError(null);
 
     try {
-      // Extract places from trip data
       const places = extractPlacesFromTrip(data);
 
       if ((!startingLocation && places.length < 2) || (startingLocation && places.length < 1)) {
-        throw new Error('Need at least 2 places to create a route');
+        throw new Error('Need at least 2 real checkpoints to create a route');
       }
 
       const sourcePoint = startingLocation || places[0];
       const destinationPoint = places[places.length - 1];
       const waypointPoints = startingLocation ? places : places.slice(1, -1);
 
-      // Call backend API to get optimized route
       const response = await apiRequest('/api/route', {
         method: 'POST',
         body: {
           source: sourcePoint,
           destination: destinationPoint,
           waypoints: waypointPoints,
-          preferences: data.preferences || {}
-        }
+          preferences: {
+            ...(data.preferences || {}),
+            mode: 'driving',
+          },
+        },
       });
 
-      setCheckpoints(response.checkpoints);
-      setRouteSummary(response.routeSummary);
-
+      setCheckpoints(Array.isArray(response.checkpoints) ? response.checkpoints : []);
+      setRouteSummary(response.routeSummary || null);
     } catch (err) {
       console.error('Error generating route:', err);
       setError(err.payload?.message || err.message || 'Failed to generate route');
-
-      // Fallback: create basic route from places
-      if (data.places) {
-        const fallbackCheckpoints = data.places.map((place, index) => ({
-          name: place.name || place,
-          lat: place.lat || getRandomLatLng().lat,
-          lng: place.lng || getRandomLatLng().lng,
-          description: place.description || `Stop ${index + 1}`,
-          why: place.why || 'Part of your optimized route'
-        }));
-        setCheckpoints(fallbackCheckpoints);
-      }
+      setCheckpoints([]);
+      setRouteSummary(null);
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const extractPlacesFromTrip = (data) => {
-    // Extract places from various possible formats
-    if (data.places && Array.isArray(data.places)) {
-      return data.places.map(place => ({
-        name: place.name || place,
-        lat: place.lat,
-        lng: place.lng,
-        description: place.description,
-        why: place.why
-      }));
-    }
-
-    // Fallback: try to extract from itinerary text
-    if (data.itinerary) {
-      return extractPlacesFromItinerary(data.itinerary);
-    }
-
-    return [];
-  };
-
-  const extractPlacesFromItinerary = (itineraryText) => {
-    // Simple regex to extract place names from itinerary
-    const placeRegex = /\*\*([^*]+)\*\*/g;
-    const places = [];
-    let match;
-
-    while ((match = placeRegex.exec(itineraryText)) !== null) {
-      const placeName = match[1].trim();
-      if (placeName && !placeName.includes('Day') && places.length < 10) {
-        places.push({
-          name: placeName,
-          lat: getRandomLatLng().lat,
-          lng: getRandomLatLng().lng,
-          description: `Visit ${placeName}`,
-          why: 'Recommended stop on your route'
-        });
-      }
-    }
-
-    return places;
-  };
-
-  const getRandomLatLng = () => {
-    // Generate random coordinates around Delhi for demo purposes
-    const baseLat = 28.6139;
-    const baseLng = 77.2090;
-    const variance = 0.5; // ~50km variance
-
-    return {
-      lat: baseLat + (Math.random() - 0.5) * variance,
-      lng: baseLng + (Math.random() - 0.5) * variance
-    };
   };
 
   const handleCheckpointClick = (index) => {
@@ -134,7 +157,6 @@ const RoutePlanner = ({ tripData, startingLocation = null, compact = false }) =>
 
   return (
     <div className="w-full space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 bg-teal-500/20 rounded-full flex items-center justify-center">
@@ -156,7 +178,6 @@ const RoutePlanner = ({ tripData, startingLocation = null, compact = false }) =>
         </button>
       </div>
 
-      {/* Error Message */}
       {error && (
         <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4">
           <div className="flex items-center gap-3">
@@ -169,21 +190,18 @@ const RoutePlanner = ({ tripData, startingLocation = null, compact = false }) =>
         </div>
       )}
 
-      {/* Main Content */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Map */}
-        <div className="lg:col-span-2">
+      <div className={stackedLayout ? 'grid grid-cols-1 gap-6' : 'grid grid-cols-1 lg:grid-cols-3 gap-6'}>
+        <div className={stackedLayout ? 'w-full' : 'lg:col-span-2'}>
           <RouteMap
             checkpoints={checkpoints}
             onCheckpointClick={handleCheckpointClick}
             selectedCheckpoint={selectedCheckpoint}
             startingLocation={startingLocation}
-            mapHeight={compact ? 'h-72' : 'h-96'}
+            mapHeight={mapHeight || (compact ? 'h-80' : 'h-[32rem]')}
           />
         </div>
 
-        {/* Sidebar */}
-        <div className={`lg:col-span-1 ${compact ? 'hidden lg:block' : ''}`}>
+        <div className={`${stackedLayout ? 'w-full' : `lg:col-span-1 ${compact ? 'hidden lg:block' : ''}`}`}>
           <RouteSidebar
             checkpoints={checkpoints}
             routeSummary={routeSummary}
@@ -191,11 +209,11 @@ const RoutePlanner = ({ tripData, startingLocation = null, compact = false }) =>
             onCheckpointClick={handleCheckpointClick}
             isLoading={isLoading}
             startingLocation={startingLocation}
+            fullWidth={stackedLayout}
           />
         </div>
       </div>
 
-      {/* Route Stats */}
       {routeSummary && !compact && (
         <div className="bg-slate-800/60 border border-slate-700 rounded-xl p-6">
           <h3 className="text-xl font-bold text-white mb-4">Route Statistics</h3>
